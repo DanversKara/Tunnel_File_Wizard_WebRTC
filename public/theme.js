@@ -73,13 +73,7 @@
   // matching the current mode; if none exists the <img> hides itself and
   // the default brand mark shows instead.
   function refreshLogo() {
-    const img = document.getElementById('brand-logo');
-    if (!img) return;
-    // Only reveal once the image actually loads; a 404 keeps it hidden and
-    // the default brand mark shows instead. (No flash of a broken image.)
-    img.onload = () => { img.classList.add('on'); };
-    img.onerror = () => { img.classList.remove('on'); };
-    img.src = '/branding/logo-' + mode;
+    if (window.TFWBrand) TFWBrand.setLogoMode(mode);
   }
 
   function setMode(next, save) {
@@ -116,39 +110,14 @@
     });
   }
 
-  // Header branding options (admin panel > Branding): the default icon and
-  // the site-name text can each be hidden, e.g. for a logo-only header.
+  // Header branding (admin panel > Branding) is owned by the universal brand
+  // component (public/brand.js): fetch the settings, then hand them over.
   async function applyBranding() {
     let b = null;
     try {
       b = await (await fetch('/api/bootstrap')).json();
     } catch { /* ignore */ }
-    if (!b) return;
-    // Footer version stamp: proves at a glance whether an upgrade took effect.
-    if (b.version) {
-      document.querySelectorAll('.app-version').forEach((el) => { el.textContent = 'v' + b.version; });
-    }
-    const branding = b.branding || null;
-    // The admin can rename the site (admin panel > Branding): apply it to the
-    // header on every page and to the tab title. Without this the header keeps
-    // showing the hardcoded default name.
-    if (b.siteName) {
-      document.querySelectorAll('.brand-text').forEach((el) => {
-        el.textContent = b.siteName;
-      });
-      if (document.title.includes('Tunnel File Wizard')) {
-        document.title = document.title.replace(/Tunnel File Wizard/g, b.siteName);
-      }
-    }
-    if (!branding) return;
-    const showIcon = branding.showIcon !== false;
-    const showText = branding.showText !== false;
-    document.querySelectorAll('.brand-icon, .brand .dot').forEach((el) => {
-      el.style.display = showIcon ? '' : 'none';
-    });
-    document.querySelectorAll('.brand-text').forEach((el) => {
-      el.style.display = showText ? '' : 'none';
-    });
+    if (window.TFWBrand) TFWBrand.applyBranding(b);
   }
 
   // Apply immediately (this script runs synchronously in <head>): the page
@@ -156,6 +125,7 @@
   applyVars();
 
   document.addEventListener('DOMContentLoaded', () => {
+    if (window.TFWBrand) TFWBrand.mount();
     const icon = document.getElementById('mode-icon');
     if (icon) icon.textContent = mode === 'light' ? '☀️' : '🌙';
     const toggle = document.getElementById('mode-toggle');

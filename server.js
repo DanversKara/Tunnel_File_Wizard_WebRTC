@@ -592,6 +592,16 @@ app.post('/api/admin/invites/:code/revoke', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// Permanently delete all revoked invite codes (admin cleanup).
+app.post('/api/admin/invites/clear-revoked', requireAdmin, (req, res) => {
+  const db = store.load();
+  const before = db.invites.length;
+  db.invites = db.invites.filter((i) => !i.revoked);
+  const cleared = before - db.invites.length;
+  if (cleared) store.save();
+  res.json({ ok: true, cleared });
+});
+
 app.post('/api/admin/invites/:code/send', requireAdmin, async (req, res) => {
   const db = store.load();
   const invite = findInvite(db, req.params.code);
@@ -715,6 +725,16 @@ app.post('/api/admin/smtp/test', requireAdmin, async (req, res) => {
 app.get('/api/admin/transfers', requireAdmin, (req, res) => {
   const db = store.load();
   res.json({ ok: true, transfers: db.transfers.slice(-300).reverse() });
+});
+
+// Clear the transfer log (admin cleanup). This also clears the "my transfers"
+// history shown to users, since both read the same log.
+app.post('/api/admin/transfers/clear', requireAdmin, (req, res) => {
+  const db = store.load();
+  const cleared = db.transfers.length;
+  db.transfers = [];
+  if (cleared) store.save();
+  res.json({ ok: true, cleared });
 });
 
 function logTransfer({ userId, email, roomId, protected: isProtected }) {

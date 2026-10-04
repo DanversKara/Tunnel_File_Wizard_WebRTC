@@ -74,34 +74,8 @@
     color: var(--muted);
   }
   .mark .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-  /* admin-uploaded brand logo (one per mode; hidden until one exists) */
-  .brand-logo {
-    height: 26px; width: auto; max-width: 150px; object-fit: contain;
-    border-radius: 6px; display: none; flex-shrink: 0;
-  }
-  .brand-logo.on { display: inline-block; }
 
-  /* ---------- animated brand icon: a file getting pulled through a tunnel by a wizard ---------- */
-  .brand-icon { width: 24px; height: 24px; flex-shrink: 0; overflow: visible; }
-  .brand-icon .tunnel-ring { fill: none; transition: stroke .25s; }
-  .brand-icon .tunnel-ring.r1 { stroke: var(--accent-dim); stroke-width: 1.6; opacity: .35; }
-  .brand-icon .tunnel-ring.r2 { stroke: var(--accent-dim); stroke-width: 1.6; opacity: .55; }
-  .brand-icon .tunnel-ring.r3 { stroke: var(--accent); stroke-width: 1.6; opacity: .85; }
-  .brand-icon .tunnel-core { fill: var(--accent); transform-origin: 20px 20px; animation: tunnelPulse 2s ease-in-out infinite; }
-  .brand-icon .hat { fill: var(--accent); }
-  .brand-icon .hat-star { fill: var(--accent); transform-origin: 4.5px 1px; animation: hatTwinkle 2s ease-in-out infinite; }
-  .brand-icon .file-travel {
-    transform-origin: 0 0;
-    animation: fileThroughTunnel 2.6s cubic-bezier(.55,0,.45,1) infinite;
-  }
-  @keyframes tunnelPulse { 0%, 100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.25); opacity: 1; } }
-  @keyframes hatTwinkle { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
-  @keyframes fileThroughTunnel {
-    0%   { transform: translate(-14px,-14px) scale(1);    opacity: 0; }
-    12%  { opacity: 1; }
-    82%  { transform: translate(0,0) scale(.18);          opacity: 1; }
-    100% { transform: translate(0,0) scale(.05);          opacity: 0; }
-  }
+  /* ---------- page-specific styles continue below ---------- */
   .mode-toggle {
     width: 36px; height: 36px; padding: 0; margin: 0; flex-shrink: 0;
     background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
@@ -300,27 +274,7 @@
 <div class="wrap">
   <header>
     <div class="header-top">
-      <span class="mark">
-        <img id="brand-logo" class="brand-logo" alt="" />
-        <svg class="brand-icon" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-          <circle class="tunnel-ring r1" cx="20" cy="20" r="17"/>
-          <circle class="tunnel-ring r2" cx="20" cy="20" r="12"/>
-          <circle class="tunnel-ring r3" cx="20" cy="20" r="7.5"/>
-          <circle class="tunnel-core" cx="20" cy="20" r="3"/>
-          <g class="hat" transform="translate(5,3) rotate(-18)">
-            <path d="M0 9 L4.5 0 L9 9 Z"/>
-            <rect x="-2" y="8" width="13" height="2" rx="1"/>
-          </g>
-          <circle class="hat-star" cx="4.5" cy="1" r="1.1"/>
-          <g transform="translate(20,20)">
-            <g class="file-travel">
-              <rect x="-3.5" y="-2.5" width="7" height="5" rx="0.8" fill="var(--text)"/>
-              <path d="M1 -2.5 L3.5 0 L1 0 Z" fill="var(--bg)"/>
-            </g>
-          </g>
-        </svg>
-        <span class="brand-text">Tunnel File Wizard</span>
-      </span>
+      <span class="mark" data-brand></span>
       <div class="header-actions">
         <div class="auth-area" id="auth-area"></div>
         <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
@@ -445,8 +399,11 @@
   </div>
 </div>
 
+<script src="/brand.js"></script>
 <script>
 (() => {
+  // Universal header brand (public/brand.js): inject the brand markup.
+  if (window.TFWBrand) TFWBrand.mount();
   // ---------- accounts: sign-in state + the admin's login-required gate ----------
   const authArea = document.getElementById('auth-area');
   const lockOverlay = document.getElementById('lock-overlay');
@@ -498,17 +455,9 @@
     }
     if (!b.setupDone) { location.href = '/setup.html'; return; }
     signedInUser = b.user || null;
-    if (b.siteName) document.title = b.siteName + ' — direct, private file transfer';
-    // Footer version stamp: proves at a glance whether an upgrade took effect.
-    if (b.version) document.getElementById('app-version').textContent = 'v' + b.version;
-    // Header branding options (admin panel > Branding): hide the default
-    // icon and/or the site-name text, e.g. for a logo-only header.
-    if (b.branding) {
-      const showIcon = b.branding.showIcon !== false;
-      const showText = b.branding.showText !== false;
-      document.querySelectorAll('.brand-icon').forEach((el) => { el.style.display = showIcon ? '' : 'none'; });
-      document.querySelectorAll('.brand-text').forEach((el) => { el.style.display = showText ? '' : 'none'; });
-    }
+    // Header branding (site name, logo size, show/hide icon/text, footer
+    // version) is owned by the universal brand component (public/brand.js).
+    if (window.TFWBrand) TFWBrand.applyBranding(b);
     renderAuthArea();
     // The admin's anti-abuse switch: when login is required and this visitor
     // isn't signed in, the whole transfer UI sits behind the lock screen.
@@ -579,16 +528,9 @@
   }
 
   // ---------- brand logo (uploaded by the admin, one per mode) ----------
-  // Shows the logo matching the current light/dark mode; if the admin
-  // hasn't uploaded one, the <img> hides itself and the default mark shows.
+  // Owned by the universal brand component (public/brand.js).
   function refreshBrandLogo() {
-    const img = document.getElementById('brand-logo');
-    if (!img) return;
-    // Only reveal once the image actually loads; a 404 keeps it hidden and
-    // the default brand mark shows instead. (No flash of a broken image.)
-    img.onload = () => { img.classList.add('on'); };
-    img.onerror = () => { img.classList.remove('on'); };
-    img.src = `/branding/logo-${currentMode}`;
+    if (window.TFWBrand) TFWBrand.setLogoMode(currentMode);
   }
 
   // ---------- light / dark mode ----------

@@ -5,13 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Admin panel — Tunnel File Wizard</title>
 <link rel="stylesheet" href="/app.css" />
+<script src="/brand.js"></script>
 <script src="/theme.js"></script>
 </head>
 <body>
 <div class="wrap wide">
   <header>
     <div class="topbar">
-      <a class="brand" href="/"><img id="brand-logo" class="brand-logo" alt="" /><span class="dot"></span><span class="brand-text">Tunnel File Wizard</span></a>
+      <a class="brand" href="/" data-brand></a>
       <div class="actions">
         <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
         <span class="badge admin" id="me-badge">admin</span>
@@ -82,7 +83,10 @@
     </div>
     <div class="err" id="inv-err"></div>
     <div class="ok-msg" id="inv-ok"></div>
-    <button id="btn-create-invite" style="max-width:280px">Create invite</button>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <button id="btn-create-invite" style="max-width:280px">Create invite</button>
+      <button id="btn-clear-revoked" class="small secondary" style="width:auto">Clear revoked</button>
+    </div>
     <div id="invites" style="margin-top:16px"><div class="empty">Loading…</div></div>
   </div>
 
@@ -183,7 +187,10 @@
 
   <!-- TRANSFERS -->
   <div class="panel">
-    <h2>Transfer log</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">Transfer log</h2>
+      <button id="btn-clear-transfers" class="small secondary" style="width:auto">Clear log</button>
+    </div>
     <p class="desc">Who created which room and when. Metadata only — the server never sees file names, sizes, or contents.</p>
     <div id="transfers"><div class="empty">Loading…</div></div>
   </div>
@@ -326,7 +333,7 @@ async function loadInvites() {
         <td>${status}</td>
         <td><div class="row-actions">
           <button class="small secondary" data-inv="copy" data-link="${esc(i.link)}">Copy link</button>
-          <button class="small secondary" data-inv="send" data-code="${esc(i.code)}">Email…</button>
+          <button class="small secondary" data-inv="send" data-code="${esc(i.code)}" data-email="${esc(i.email || '')}">Send Email</button>
           ${!i.revoked ? `<button class="small danger" data-inv="revoke" data-code="${esc(i.code)}">Revoke</button>` : ''}
         </div></td></tr>`;
     }).join('') + `</table>`;
@@ -344,7 +351,7 @@ async function inviteAction(btn) {
     if (!d.ok) { $('inv-err').textContent = d.error; return; }
     loadInvites();
   } else if (kind === 'send') {
-    const email = prompt('Email address to send this invite to:');
+    const email = prompt('Email address to send this invite to:', btn.dataset.email || '');
     if (!email) return;
     btn.disabled = true;
     const d = await api(`/api/admin/invites/${btn.dataset.code}/send`, 'POST', { email: email.trim() });
@@ -366,6 +373,20 @@ $('btn-create-invite').addEventListener('click', async () => {
   if (ok) $('inv-ok').textContent += ' — link copied to clipboard.';
   $('inv-note').value = $('inv-email').value = '';
   loadInvites();
+});
+$('btn-clear-revoked').addEventListener('click', async () => {
+  $('inv-err').textContent = ''; $('inv-ok').textContent = '';
+  if (!confirm('Permanently delete all revoked invite codes? This cannot be undone.')) return;
+  const d = await api('/api/admin/invites/clear-revoked', 'POST', {});
+  if (!d.ok) { $('inv-err').textContent = d.error || 'Clear failed.'; return; }
+  $('inv-ok').textContent = d.cleared ? `Cleared ${d.cleared} revoked invite${d.cleared === 1 ? '' : 's'}.` : 'No revoked invites to clear.';
+  loadInvites();
+});
+$('btn-clear-transfers').addEventListener('click', async () => {
+  if (!confirm('Delete the entire transfer log? This cannot be undone.')) return;
+  const d = await api('/api/admin/transfers/clear', 'POST', {});
+  if (!d.ok) { alert(d.error || 'Clear failed.'); return; }
+  loadTransfers();
 });
 
 // ---------- SMTP ----------
@@ -501,7 +522,6 @@ $('btn-save-branding').addEventListener('click', async () => {
   $('brand-ok').textContent = 'Branding saved.';
   if (window.TFWTheme) TFWTheme.applyBranding();
 });
-
 // ---------- init ----------
 (async () => {
   try {

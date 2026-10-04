@@ -113,12 +113,8 @@ footer a { color: var(--muted); }
   content: ''; position: absolute; inset: -5px; border: 1px solid var(--accent); border-radius: 50%;
 }
 
-/* admin-uploaded brand logo (one per mode; hidden until one exists) */
-.brand-logo {
-  height: 24px; width: auto; max-width: 150px; object-fit: contain;
-  border-radius: 6px; display: none; flex-shrink: 0;
-}
-.brand-logo.on { display: inline-block; }
+/* Brand logo/icon CSS lives in public/brand.js (the universal brand component),
+   which injects it — single source of truth, no per-page copies. */
 .brand { gap: 8px; }
 .brand .dot { flex-shrink: 0; }
 
