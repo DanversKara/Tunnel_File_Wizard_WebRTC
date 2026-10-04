@@ -129,6 +129,17 @@
       document.querySelectorAll('.app-version').forEach((el) => { el.textContent = 'v' + b.version; });
     }
     const branding = b.branding || null;
+    // The admin can rename the site (admin panel > Branding): apply it to the
+    // header on every page and to the tab title. Without this the header keeps
+    // showing the hardcoded default name.
+    if (b.siteName) {
+      document.querySelectorAll('.brand-text').forEach((el) => {
+        el.textContent = b.siteName;
+      });
+      if (document.title.includes('Tunnel File Wizard')) {
+        document.title = document.title.replace(/Tunnel File Wizard/g, b.siteName);
+      }
+    }
     if (!branding) return;
     const showIcon = branding.showIcon !== false;
     const showText = branding.showText !== false;

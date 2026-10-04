@@ -45,11 +45,10 @@
     </div>
     <div class="toggle-row">
       <div>
-        <div class="t-label">Site name &amp; address</div>
-        <div class="t-desc">Used in page titles and in the links inside emails. The address should be the public URL of this server.</div>
+        <div class="t-label">Site address</div>
+        <div class="t-desc">Used in the links inside emails. Should be the public URL of this server.</div>
       </div>
     </div>
-    <div class="field"><label>Site name</label><input type="text" id="set-siteName" maxlength="80" /></div>
     <div class="field"><label>Site URL (for email links)</label><input type="text" id="set-siteUrl" placeholder="https://files.example.com" maxlength="200" /></div>
     <div class="err" id="access-err"></div>
     <div class="ok-msg" id="access-ok"></div>
@@ -130,6 +129,11 @@
   <div class="panel">
     <h2>Branding</h2>
     <p class="desc">Upload a logo for the page header — one version for dark mode, one for light mode. The right one shows automatically everywhere. PNG, JPG, WebP, GIF, or SVG, under 500 KB each.</p>
+    <div class="field" style="max-width:420px">
+      <label for="brand-site-name">Site name</label>
+      <input type="text" id="brand-site-name" maxlength="80" placeholder="Tunnel File Wizard" />
+      <div class="hint">Shown in the header next to the logo, in the tab title, and in emails.</div>
+    </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap">
       <div style="flex:1;min-width:220px">
         <div class="field-label">Dark mode logo</div>
@@ -162,7 +166,7 @@
     <div class="toggle-row">
       <div>
         <div class="t-label">Show the site name text</div>
-        <div class="t-desc">"Tunnel File Wizard" next to the logo. Turn off for a logo-only header.</div>
+        <div class="t-desc">The site name next to the logo. Turn off for a logo-only header.</div>
       </div>
       <label class="switch"><input type="checkbox" id="brand-show-text" /><span class="slider"></span></label>
     </div>
@@ -219,7 +223,6 @@ function renderAccess() {
   $('set-loginRequired').checked = !!settings.loginRequired;
   document.querySelectorAll('#signup-seg button').forEach((b) =>
     b.classList.toggle('active', b.dataset.mode === settings.signupMode));
-  $('set-siteName').value = settings.siteName || '';
   $('set-siteUrl').value = settings.siteUrl || '';
 }
 document.querySelectorAll('#signup-seg button').forEach((b) =>
@@ -239,7 +242,6 @@ $('btn-save-access').addEventListener('click', async () => {
   const mode = document.querySelector('#signup-seg button.active').dataset.mode;
   const d = await api('/api/admin/settings', 'PUT', {
     signupMode: mode,
-    siteName: $('set-siteName').value.trim(),
     siteUrl: $('set-siteUrl').value.trim(),
   });
   if (d.ok) { settings = d.settings; renderAccess(); $('access-ok').textContent = 'Saved.'; }
@@ -491,6 +493,7 @@ function setupLogoUpload(which) {
 $('btn-save-branding').addEventListener('click', async () => {
   $('brand-err').textContent = ''; $('brand-ok').textContent = '';
   const d = await api('/api/admin/settings', 'PUT', {
+    siteName: $('brand-site-name').value.trim(),
     branding: { showIcon: $('brand-show-icon').checked, showText: $('brand-show-text').checked },
   });
   if (!d.ok) { $('brand-err').textContent = d.error || 'Save failed.'; return; }
@@ -513,6 +516,7 @@ $('btn-save-branding').addEventListener('click', async () => {
     renderAccess(); renderSmtp();
     $('brand-show-icon').checked = !d.settings.branding || d.settings.branding.showIcon !== false;
     $('brand-show-text').checked = !d.settings.branding || d.settings.branding.showText !== false;
+    $('brand-site-name').value = d.settings.siteName || '';
     loadUsers(); loadInvites(); loadDevices(); loadTransfers();
     setupLogoUpload('dark'); setupLogoUpload('light'); refreshLogoPreviews();
   } catch { /* redirected */ }
