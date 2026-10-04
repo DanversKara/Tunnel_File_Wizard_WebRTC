@@ -51,7 +51,9 @@
   function savedTheme() {
     try {
       const t = localStorage.getItem(THEME_KEY);
-      if (t && THEMES[t]) return t;
+      // hasOwnProperty, not truthiness: THEMES['__proto__'] is truthy
+      // (Object.prototype) but is not a real theme.
+      if (t && Object.prototype.hasOwnProperty.call(THEMES, t)) return t;
     } catch {}
     return 'amber';
   }
@@ -90,7 +92,7 @@
   }
 
   function setTheme(key, save) {
-    if (!THEMES[key]) return;
+    if (!Object.prototype.hasOwnProperty.call(THEMES, key)) return;
     theme = key;
     if (save !== false) { try { localStorage.setItem(THEME_KEY, key); } catch {} }
     applyVars();
@@ -117,11 +119,16 @@
   // Header branding options (admin panel > Branding): the default icon and
   // the site-name text can each be hidden, e.g. for a logo-only header.
   async function applyBranding() {
-    let branding = null;
+    let b = null;
     try {
-      const b = await (await fetch('/api/bootstrap')).json();
-      branding = b.branding || null;
+      b = await (await fetch('/api/bootstrap')).json();
     } catch { /* ignore */ }
+    if (!b) return;
+    // Footer version stamp: proves at a glance whether an upgrade took effect.
+    if (b.version) {
+      document.querySelectorAll('.app-version').forEach((el) => { el.textContent = 'v' + b.version; });
+    }
+    const branding = b.branding || null;
     if (!branding) return;
     const showIcon = branding.showIcon !== false;
     const showText = branding.showText !== false;

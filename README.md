@@ -128,9 +128,9 @@ The one nuance worth being honest about: **if you enable the optional TURN relay
 
 There's no size limit enforced by the server — it can't enforce one, because it never sees the file. The real constraint is on the **receiver's side**: right now, the receiving browser buffers the entire incoming file in memory (as an array of binary chunks) before assembling it into a downloadable `Blob`. That means the practical ceiling is however much memory that browser tab can hold before the tab itself becomes unstable.
 
-Tunnel File Wizard ships with a **client-side cap of 2GB** (in `public/index.html`, the `MAX_FILE_SIZE_BYTES` constant) — trying to select a larger file shows an inline warning and disables the "Create transfer" button. This is a safety default, not a technical wall:
+Tunnel File Wizard ships with a **client-side cap of 20GB** (in `public/index.html`, the `MAX_FILE_SIZE_BYTES` constant) — trying to select a larger file shows an inline warning and disables the "Create transfer" button. This is a safety default, not a technical wall:
 
-- **To raise it:** just change `MAX_FILE_SIZE_BYTES` in `public/index.html`. Whether that's a good idea depends on the memory available on whatever device is *receiving* — a desktop with 16GB of RAM will handle a 4-5GB transfer fine; a phone browser tab might not.
+- **To change it:** just change `MAX_FILE_SIZE_BYTES` in `public/index.html`. Whether that's a good idea depends on the memory available on whatever device is *receiving* — a desktop with 32GB of RAM will handle a 20GB transfer; a phone browser tab will not.
 - **To remove the ceiling properly** (rather than just raising the number): swap the in-memory buffer on the receiver side for the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API) (`showSaveFilePicker` + a writable stream), so incoming chunks get written to disk as they arrive instead of held in RAM. That's the "real" fix for very large files and is a natural next contribution.
 
 ## If the connection drops or the sender leaves

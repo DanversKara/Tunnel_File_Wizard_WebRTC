@@ -31,6 +31,10 @@ const { WebSocketServer, WebSocket } = require('ws');
 const store = require('./lib/store');
 const mailer = require('./lib/mailer');
 
+// Shown in the page footers so you can tell at a glance whether an
+// upgrade actually took effect. Bump in package.json with each release.
+const APP_VERSION = require('./package.json').version;
+
 const app = express();
 // This app is designed to run behind a reverse proxy (Cloudflare,
 // Cloudflare Tunnel, Nginx Proxy Manager, etc). Trusting the first proxy
@@ -230,6 +234,7 @@ app.get('/api/bootstrap', (req, res) => {
   const branding = db.settings.branding || {};
   res.json({
     ok: true,
+    version: APP_VERSION,
     setupDone: db.users.length > 0,
     loginRequired: !!db.settings.loginRequired,
     signupMode: db.settings.signupMode === 'public' ? 'public' : 'invite',
@@ -938,7 +943,11 @@ wss.on('connection', (ws, req) => {
           passwordHash = hashPassword(password, salt);
         }
 
-        const theme = typeof msg.theme === 'string' ? msg.theme.slice(0, 32) : 'amber';
+        // Theme is an allowlist, not a free string: the receiver's page looks the
+        // theme name up in a fixed object, and a crafted value like
+        // "__proto__" would crash their page. Fail closed to the default.
+        const THEME_KEYS = ['amber', 'midnight', 'forest', 'rosewood', 'mono'];
+        const theme = THEME_KEYS.includes(msg.theme) ? msg.theme : 'amber';
         const senderName = typeof msg.senderName === 'string' ? msg.senderName.trim().slice(0, 60) : '';
         const senderMessage = typeof msg.message === 'string' ? msg.message.trim().slice(0, 300) : '';
 
