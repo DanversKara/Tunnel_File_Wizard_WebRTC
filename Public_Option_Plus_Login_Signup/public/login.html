@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in — Tunnel File Wizard</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="topbar">
+      <a class="brand" href="/"><img id="brand-logo" class="brand-logo" alt="" /><span class="dot"></span><span class="brand-text">Tunnel File Wizard</span></a>
+      <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
+    </div>
+    <h1 id="title">Sign in</h1>
+    <p class="sub" id="subtitle">Welcome back.</p>
+  </header>
+
+  <!-- normal sign-in -->
+  <div class="panel" id="login-panel">
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="email" />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" />
+    </div>
+    <label class="check-row">
+      <input type="checkbox" id="trust" />
+      <span>Trust this device — skip sign-in here from now on
+        <small>Use this on the device that runs the service (or your own phone/laptop). Anyone with this device gets straight in as you, so only use it on hardware you control.</small>
+      </span>
+    </label>
+    <div class="err" id="err"></div>
+    <div class="ok-msg" id="ok"></div>
+    <button id="btn">Sign in</button>
+    <p class="muted-link" style="margin-top:14px">
+      <span id="signup-link-wrap" class="hidden">No account yet? <a href="/signup.html">Create one</a><br /></span>
+      <a href="#" id="forgot-link">Forgot your password?</a>
+    </p>
+  </div>
+
+  <!-- forgot password -->
+  <div class="panel hidden" id="forgot-panel">
+    <h2>Reset your password</h2>
+    <p class="desc">Enter your email and we'll send you a reset link (valid for 1 hour).</p>
+    <div class="field">
+      <label for="f-email">Email</label>
+      <input type="email" id="f-email" autocomplete="email" />
+    </div>
+    <div class="err" id="f-err"></div>
+    <div class="ok-msg" id="f-ok"></div>
+    <button id="f-btn">Send reset link</button>
+    <p class="muted-link" style="margin-top:14px"><a href="#" id="back-link">← Back to sign in</a></p>
+  </div>
+
+  <!-- set new password from reset link -->
+  <div class="panel hidden" id="reset-panel">
+    <h2>Choose a new password</h2>
+    <div class="field">
+      <label for="r-password">New password (min. 8 characters)</label>
+      <input type="password" id="r-password" autocomplete="new-password" />
+    </div>
+    <div class="err" id="r-err"></div>
+    <div class="ok-msg" id="r-ok"></div>
+    <button id="r-btn">Set new password</button>
+  </div>
+
+  <footer><a href="/">← Back to file transfer</a></footer>
+</div>
+
+<script>
+(async () => {
+  const err = document.getElementById('err');
+  const okMsg = document.getElementById('ok');
+  let resetToken = new URLSearchParams(location.search).get('reset');
+
+  try {
+    const b = await (await fetch('/api/bootstrap')).json();
+    if (!b.setupDone) { location.href = '/setup.html'; return; }
+    if (b.user) { location.href = b.user.role === 'admin' ? '/admin.html' : '/'; return; }
+    if (b.siteName) document.title = 'Sign in — ' + b.siteName;
+    // Only show the sign-up link when sign-up can actually work.
+    if (!b.loginRequired || b.signupMode === 'public') {
+      document.getElementById('signup-link-wrap').classList.remove('hidden');
+    }
+    if (!b.smtpConfigured) document.getElementById('forgot-link').style.display = 'none';
+  } catch {}
+
+  if (resetToken) {
+    document.getElementById('login-panel').classList.add('hidden');
+    document.getElementById('forgot-panel').classList.add('hidden');
+    document.getElementById('reset-panel').classList.remove('hidden');
+    document.getElementById('title').textContent = 'Reset password';
+    document.getElementById('subtitle').textContent = 'Pick a new password for your account.';
+  }
+
+  async function doLogin() {
+    err.textContent = ''; okMsg.textContent = '';
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const trustDevice = document.getElementById('trust').checked;
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, trustDevice, deviceName: navigator.platform || 'browser' }),
+      });
+      const d = await r.json();
+      if (!d.ok) { err.textContent = d.error || 'Sign-in failed.'; btn.disabled = false; return; }
+      location.href = d.user.role === 'admin' ? '/admin.html' : '/';
+    } catch { err.textContent = 'Could not reach the server.'; btn.disabled = false; }
+  }
+  document.getElementById('btn').addEventListener('click', doLogin);
+  document.getElementById('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+  document.getElementById('forgot-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('login-panel').classList.add('hidden');
+    document.getElementById('forgot-panel').classList.remove('hidden');
+  });
+  document.getElementById('back-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    document.getElementById('forgot-panel').classList.add('hidden');
+    document.getElementById('login-panel').classList.remove('hidden');
+  });
+  document.getElementById('f-btn').addEventListener('click', async () => {
+    const e2 = document.getElementById('f-err'), o2 = document.getElementById('f-ok');
+    e2.textContent = ''; o2.textContent = '';
+    const email = document.getElementById('f-email').value.trim();
+    const btn = document.getElementById('f-btn');
+    btn.disabled = true;
+    try {
+      await fetch('/api/password/forgot', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      o2.textContent = 'If an account exists for that email, a reset link is on its way.';
+    } catch { e2.textContent = 'Could not reach the server.'; }
+    btn.disabled = false;
+  });
+
+  document.getElementById('r-btn').addEventListener('click', async () => {
+    const e3 = document.getElementById('r-err'), o3 = document.getElementById('r-ok');
+    e3.textContent = ''; o3.textContent = '';
+    const password = document.getElementById('r-password').value;
+    if (password.length < 8) { e3.textContent = 'Password must be at least 8 characters.'; return; }
+    const btn = document.getElementById('r-btn');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/password/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: resetToken, password }),
+      });
+      const d = await r.json();
+      if (!d.ok) { e3.textContent = d.error || 'Reset failed.'; btn.disabled = false; return; }
+      o3.textContent = 'Password updated. You can sign in now.';
+      resetToken = null;
+      history.replaceState(null, '', '/login.html');
+      setTimeout(() => {
+        document.getElementById('reset-panel').classList.add('hidden');
+        document.getElementById('login-panel').classList.remove('hidden');
+        document.getElementById('title').textContent = 'Sign in';
+      }, 1500);
+    } catch { e3.textContent = 'Could not reach the server.'; btn.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>

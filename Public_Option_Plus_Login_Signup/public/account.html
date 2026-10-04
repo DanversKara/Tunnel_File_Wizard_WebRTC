@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My account — Tunnel File Wizard</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="topbar">
+      <a class="brand" href="/"><img id="brand-logo" class="brand-logo" alt="" /><span class="dot"></span><span class="brand-text">Tunnel File Wizard</span></a>
+      <div class="actions">
+        <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
+        <button class="small secondary" id="btn-logout" style="width:auto">Sign out</button>
+      </div>
+    </div>
+    <h1>My account</h1>
+    <p class="sub" id="hello"></p>
+  </header>
+
+  <div class="panel">
+    <h2>Profile</h2>
+    <p class="desc">Your name is shown to nobody but you and the admin. Your email is your sign-in.</p>
+    <div class="field">
+      <label for="name">Display name</label>
+      <input type="text" id="name" autocomplete="name" />
+    </div>
+    <div class="field">
+      <label>Email (sign-in — cannot be changed here)</label>
+      <input type="email" id="email" disabled />
+    </div>
+    <div class="field">
+      <label>Theme <span class="hint" style="display:inline">— this device only</span></label>
+      <div class="theme-row" id="theme-row"></div>
+    </div>
+    <div class="err" id="p-err"></div>
+    <div class="ok-msg" id="p-ok"></div>
+    <button id="btn-save">Save profile</button>
+  </div>
+
+  <div class="panel">
+    <h2>Change password</h2>
+    <div class="field">
+      <label for="cur">Current password</label>
+      <input type="password" id="cur" autocomplete="current-password" />
+    </div>
+    <div class="field">
+      <label for="next">New password (min. 8 characters)</label>
+      <input type="password" id="next" autocomplete="new-password" />
+    </div>
+    <div class="err" id="w-err"></div>
+    <div class="ok-msg" id="w-ok"></div>
+    <button id="btn-pw">Change password</button>
+  </div>
+
+  <div class="panel">
+    <h2>This device</h2>
+    <p class="desc" id="trust-desc">Checking…</p>
+    <div class="btn-row">
+      <button class="secondary" id="btn-trust">Trust this device</button>
+      <button class="secondary hidden" id="btn-untrust">Forget this device</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>My transfers</h2>
+    <p class="desc">Rooms you've created. The server only ever records <em>that</em> a transfer room existed — never file names, sizes, or contents.</p>
+    <div id="transfers"><div class="empty">Loading…</div></div>
+  </div>
+
+  <footer><a href="/">← Back to file transfer</a> · <a href="/admin.html" id="admin-link" class="hidden">Admin panel</a></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function hasDeviceCookie() {
+  return document.cookie.split(';').some((c) => c.trim().startsWith('tfw_device='));
+}
+
+async function api(path, method, body) {
+  const r = await fetch(path, {
+    method: method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok && r.status === 401) { location.href = '/login.html'; throw new Error('auth'); }
+  return { status: r.status, data: d };
+}
+
+(async () => {
+  let me;
+  try {
+    const { data } = await api('/api/me');
+    if (!data.ok) { location.href = '/login.html'; return; }
+    me = data.user;
+  } catch { return; }
+
+  $('hello').textContent = `Signed in as ${me.name} (${me.email})`;
+  $('name').value = me.name;
+  $('email').value = me.email;
+  if (me.role === 'admin') $('admin-link').classList.remove('hidden');
+
+  function refreshTrustUI() {
+    const trusted = hasDeviceCookie();
+    $('btn-trust').classList.toggle('hidden', trusted);
+    $('btn-untrust').classList.toggle('hidden', !trusted);
+    $('trust-desc').textContent = trusted
+      ? 'This device is trusted — it signs you in automatically, no password needed.'
+      : 'This device is not trusted — you sign in with your password each visit.';
+  }
+  refreshTrustUI();
+
+  $('btn-logout').addEventListener('click', async () => {
+    await api('/api/logout', 'POST', {});
+    location.href = '/login.html';
+  });
+
+  $('btn-save').addEventListener('click', async () => {
+    $('p-err').textContent = ''; $('p-ok').textContent = '';
+    const { data } = await api('/api/me', 'PATCH', { name: $('name').value.trim() });
+    if (!data.ok) { $('p-err').textContent = data.error || 'Save failed.'; return; }
+    $('p-ok').textContent = 'Profile saved.';
+    $('hello').textContent = `Signed in as ${data.user.name} (${data.user.email})`;
+  });
+
+  $('btn-pw').addEventListener('click', async () => {
+    $('w-err').textContent = ''; $('w-ok').textContent = '';
+    const { data } = await api('/api/me/password', 'POST', {
+      currentPassword: $('cur').value, newPassword: $('next').value,
+    });
+    if (!data.ok) { $('w-err').textContent = data.error || 'Change failed.'; return; }
+    $('w-ok').textContent = 'Password changed. Other signed-in sessions were signed out.';
+    $('cur').value = ''; $('next').value = '';
+  });
+
+  $('btn-trust').addEventListener('click', async () => {
+    await api('/api/me/device/trust', 'POST', { name: navigator.platform || 'browser' });
+    refreshTrustUI();
+  });
+  $('btn-untrust').addEventListener('click', async () => {
+    await api('/api/me/device/forget', 'POST', {});
+    refreshTrustUI();
+  });
+
+  // My transfers
+  try {
+    const { data } = await api('/api/my/transfers');
+    const box = $('transfers');
+    if (!data.ok || !data.transfers.length) {
+      box.innerHTML = '<div class="empty">No transfers yet. When you create one, it will show up here.</div>';
+    } else {
+      const rows = data.transfers.map((t) => {
+        const when = new Date(t.at).toLocaleString();
+        return `<tr><td><span class="code-chip">${t.roomId}</span></td><td>${t.protected ? '🔒' : '—'}</td><td>${when}</td></tr>`;
+      }).join('');
+      box.innerHTML = `<table><tr><th>Room</th><th>Locked</th><th>Created</th></tr>${rows}</table>`;
+    }
+  } catch {}
+})();
+</script>
+</body>
+</html>

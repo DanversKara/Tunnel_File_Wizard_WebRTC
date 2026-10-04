@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Set up — Tunnel File Wizard</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="topbar">
+      <span class="brand"><img id="brand-logo" class="brand-logo" alt="" /><span class="dot"></span><span class="brand-text">Tunnel File Wizard</span></span>
+      <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
+    </div>
+    <h1>Welcome — let's set up your server</h1>
+    <p class="sub">This only happens once. Create the admin account for this server. The admin manages users, invites, and settings — and the device you're on right now can be trusted so it never has to sign in again.</p>
+  </header>
+
+  <div class="panel">
+    <h2>Create the admin account</h2>
+    <p class="desc">Use an email you own. If you configure SMTP later, invites and password resets will be sent from your own mail server.</p>
+    <div class="field">
+      <label for="name">Your name</label>
+      <input type="text" id="name" autocomplete="name" placeholder="e.g. Alex" />
+    </div>
+    <div class="field">
+      <label for="email">Email (your sign-in)</label>
+      <input type="email" id="email" autocomplete="email" placeholder="you@example.com" />
+    </div>
+    <div class="field">
+      <label for="password">Password (min. 8 characters)</label>
+      <input type="password" id="password" autocomplete="new-password" />
+    </div>
+    <div class="field">
+      <label for="password2">Repeat password</label>
+      <input type="password" id="password2" autocomplete="new-password" />
+    </div>
+    <div class="err" id="err"></div>
+    <button id="btn">Create admin account</button>
+  </div>
+  <footer>Files never pass through a server. Your data stays in <span class="code-chip">/app/data</span> on this machine.</footer>
+</div>
+
+<script>
+(async () => {
+  // If setup is already done, there's nothing to do here.
+  try {
+    const b = await (await fetch('/api/bootstrap')).json();
+    if (b.setupDone) { location.href = '/'; return; }
+    if (b.siteName) document.title = 'Set up — ' + b.siteName;
+  } catch {}
+
+  const err = document.getElementById('err');
+  document.getElementById('btn').addEventListener('click', async () => {
+    err.textContent = '';
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const p1 = document.getElementById('password').value;
+    const p2 = document.getElementById('password2').value;
+    if (p1 !== p2) { err.textContent = 'The passwords do not match.'; return; }
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/setup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password: p1 }),
+      });
+      const d = await r.json();
+      if (!d.ok) { err.textContent = d.error || 'Setup failed.'; btn.disabled = false; return; }
+      location.href = '/admin.html';
+    } catch { err.textContent = 'Could not reach the server.'; btn.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>

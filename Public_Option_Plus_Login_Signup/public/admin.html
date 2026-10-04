@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin panel — Tunnel File Wizard</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="wrap wide">
+  <header>
+    <div class="topbar">
+      <a class="brand" href="/"><img id="brand-logo" class="brand-logo" alt="" /><span class="dot"></span><span class="brand-text">Tunnel File Wizard</span></a>
+      <div class="actions">
+        <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
+        <span class="badge admin" id="me-badge">admin</span>
+        <button class="small secondary" id="btn-logout" style="width:auto">Sign out</button>
+      </div>
+    </div>
+    <h1>Admin panel</h1>
+    <p class="sub">Who can use this server, how they sign up, and where the emails come from.</p>
+  </header>
+
+  <!-- ACCESS -->
+  <div class="panel">
+    <h2>Access control</h2>
+    <p class="desc">The master switches. Changes apply immediately.</p>
+    <div class="toggle-row">
+      <div>
+        <div class="t-label">Login required</div>
+        <div class="t-desc">When ON, only signed-in users can send or receive files — anonymous strangers are locked out entirely. This is the anti-abuse switch: flip it on if bad actors find your server. When OFF, anyone with the link can use it (the original behavior).</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="set-loginRequired" /><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="t-label">Sign-up mode</div>
+        <div class="t-desc">Only matters when login is required. <b>Invite only</b>: new users need a code you create below. <b>Public</b>: anyone can create an account.</div>
+        <div class="seg" id="signup-seg" style="max-width:340px">
+          <button data-mode="invite">Invite only</button>
+          <button data-mode="public">Public sign-up</button>
+        </div>
+      </div>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="t-label">Site name &amp; address</div>
+        <div class="t-desc">Used in page titles and in the links inside emails. The address should be the public URL of this server.</div>
+      </div>
+    </div>
+    <div class="field"><label>Site name</label><input type="text" id="set-siteName" maxlength="80" /></div>
+    <div class="field"><label>Site URL (for email links)</label><input type="text" id="set-siteUrl" placeholder="https://files.example.com" maxlength="200" /></div>
+    <div class="err" id="access-err"></div>
+    <div class="ok-msg" id="access-ok"></div>
+    <button id="btn-save-access" style="max-width:280px">Save access &amp; site settings</button>
+  </div>
+
+  <!-- USERS -->
+  <div class="panel">
+    <h2>Users</h2>
+    <p class="desc">Everyone with an account. Disabled users are signed out immediately and can't sign back in.</p>
+    <div id="users"><div class="empty">Loading…</div></div>
+    <h2 style="margin-top:22px">Create user</h2>
+    <div class="field"><label>Name</label><input type="text" id="nu-name" /></div>
+    <div class="field"><label>Email</label><input type="email" id="nu-email" /></div>
+    <div class="field"><label>Password (min. 8 characters)</label><input type="password" id="nu-password" autocomplete="new-password" /></div>
+    <div class="field"><label>Role</label><select id="nu-role"><option value="user">User</option><option value="admin">Admin</option></select></div>
+    <div class="err" id="users-err"></div>
+    <div class="ok-msg" id="users-ok"></div>
+    <button id="btn-create-user" style="max-width:280px">Create user</button>
+  </div>
+
+  <!-- INVITES -->
+  <div class="panel">
+    <h2>Invites</h2>
+    <p class="desc">Invite codes for invite-only sign-up. Share the link directly, or email it — needs SMTP below.</p>
+    <div class="field"><label>Note (optional — who is this for?)</label><input type="text" id="inv-note" maxlength="120" placeholder="e.g. Sam's laptop" /></div>
+    <div class="field"><label>Restrict to email (optional)</label><input type="email" id="inv-email" placeholder="leave blank for anyone with the code" /></div>
+    <div style="display:flex;gap:12px">
+      <div class="field" style="flex:1"><label>Max uses</label><input type="number" id="inv-uses" value="1" min="1" max="1000" /></div>
+      <div class="field" style="flex:1"><label>Expires in (days, 0 = never)</label><input type="number" id="inv-days" value="7" min="0" max="3650" /></div>
+    </div>
+    <div class="err" id="inv-err"></div>
+    <div class="ok-msg" id="inv-ok"></div>
+    <button id="btn-create-invite" style="max-width:280px">Create invite</button>
+    <div id="invites" style="margin-top:16px"><div class="empty">Loading…</div></div>
+  </div>
+
+  <!-- SMTP -->
+  <div class="panel">
+    <h2>Email (SMTP)</h2>
+    <p class="desc">Your own mail server. Used for invite emails and password resets. Nothing is ever sent anywhere else.</p>
+    <div class="field"><label>SMTP host</label><input type="text" id="smtp-host" placeholder="mail.example.com" /></div>
+    <div style="display:flex;gap:12px">
+      <div class="field" style="flex:1"><label>Port</label><input type="number" id="smtp-port" value="587" min="1" max="65535" /></div>
+      <div class="field" style="flex:2"><label>Encryption</label>
+        <select id="smtp-enc">
+          <option value="starttls">STARTTLS (port 587 — most common)</option>
+          <option value="ssl">SSL/TLS (port 465)</option>
+          <option value="none">None (port 25 — LAN relays / testing only)</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Username</label><input type="text" id="smtp-user" autocomplete="off" /></div>
+    <div class="field"><label>Password</label><input type="password" id="smtp-pass" autocomplete="new-password" placeholder="••••••••" /><div class="hint">Leave as-is to keep the saved password.</div></div>
+    <div class="field"><label>From address</label><input type="text" id="smtp-from" placeholder="Tunnel File Wizard <files@example.com>" /></div>
+    <label class="check-row">
+      <input type="checkbox" id="smtp-insecure" />
+      <span>Skip certificate verification
+        <small>Only for your own mail server on your LAN — when its certificate is for its hostname (not the IP you're connecting to) or self-signed. Never enable this for a public mail provider.</small>
+      </span>
+    </label>
+    <div class="err" id="smtp-err"></div>
+    <div class="ok-msg" id="smtp-ok"></div>
+    <div class="btn-row" style="max-width:560px">
+      <button id="btn-save-smtp" style="flex:1">Save SMTP settings</button>
+      <button class="secondary" id="btn-test-smtp" style="flex:1">Send test email…</button>
+    </div>
+    <div class="field hidden" id="test-wrap">
+      <label>Send the test to</label>
+      <div style="display:flex;gap:8px">
+        <input type="email" id="test-to" placeholder="you@example.com" style="flex:1" />
+        <button class="small" id="btn-do-test" style="width:auto;padding:9px 18px">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BRANDING -->
+  <div class="panel">
+    <h2>Branding</h2>
+    <p class="desc">Upload a logo for the page header — one version for dark mode, one for light mode. The right one shows automatically everywhere. PNG, JPG, WebP, GIF, or SVG, under 500 KB each.</p>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <div class="field-label">Dark mode logo</div>
+        <div class="logo-preview" id="preview-dark"><span class="empty">No logo</span></div>
+        <div class="btn-row">
+          <button class="secondary small" id="btn-logo-dark">Upload…</button>
+          <button class="secondary small hidden" id="btn-logo-dark-rm">Remove</button>
+        </div>
+        <input type="file" id="file-logo-dark" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" class="hidden" />
+      </div>
+      <div style="flex:1;min-width:220px">
+        <div class="field-label">Light mode logo</div>
+        <div class="logo-preview" id="preview-light"><span class="empty">No logo</span></div>
+        <div class="btn-row">
+          <button class="secondary small" id="btn-logo-light">Upload…</button>
+          <button class="secondary small hidden" id="btn-logo-light-rm">Remove</button>
+        </div>
+        <input type="file" id="file-logo-light" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" class="hidden" />
+      </div>
+    </div>
+    <div class="err" id="brand-err"></div>
+    <div class="ok-msg" id="brand-ok"></div>
+    <div class="toggle-row">
+      <div>
+        <div class="t-label">Show the default icon</div>
+        <div class="t-desc">The yellow tunnel mark in the header. Turn off for a logo-only header.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="brand-show-icon" /><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="t-label">Show the site name text</div>
+        <div class="t-desc">"Tunnel File Wizard" next to the logo. Turn off for a logo-only header.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="brand-show-text" /><span class="slider"></span></label>
+    </div>
+    <button id="btn-save-branding" style="max-width:280px">Save branding</button>
+    <p class="desc" style="margin-top:10px;margin-bottom:0">Tip: after uploading, you may need a hard refresh (Ctrl/Cmd+Shift+R) to see the new logo.</p>
+  </div>
+
+  <!-- DEVICES -->
+  <div class="panel">
+    <h2>Trusted devices</h2>
+    <p class="desc">Devices that skip sign-in entirely ("Trust this device"). Revoke any you don't recognize. Your current device is the one you're on now.</p>
+    <div id="devices"><div class="empty">Loading…</div></div>
+  </div>
+
+  <!-- TRANSFERS -->
+  <div class="panel">
+    <h2>Transfer log</h2>
+    <p class="desc">Who created which room and when. Metadata only — the server never sees file names, sizes, or contents.</p>
+    <div id="transfers"><div class="empty">Loading…</div></div>
+  </div>
+
+  <footer><a href="/">← Back to file transfer</a></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let me = null, settings = null;
+
+async function api(path, method, body) {
+  const r = await fetch(path, {
+    method: method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403) { location.href = '/login.html'; throw new Error('auth'); }
+  return d;
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function when(ts) { return ts ? new Date(ts).toLocaleString() : '—'; }
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch {}
+    document.body.removeChild(ta); return ok;
+  }
+}
+
+// ---------- access ----------
+function renderAccess() {
+  $('set-loginRequired').checked = !!settings.loginRequired;
+  document.querySelectorAll('#signup-seg button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.mode === settings.signupMode));
+  $('set-siteName').value = settings.siteName || '';
+  $('set-siteUrl').value = settings.siteUrl || '';
+}
+document.querySelectorAll('#signup-seg button').forEach((b) =>
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#signup-seg button').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+  }));
+$('set-loginRequired').addEventListener('change', async () => {
+  // The big switch applies instantly — no separate save needed.
+  $('access-err').textContent = ''; $('access-ok').textContent = '';
+  const d = await api('/api/admin/settings', 'PUT', { loginRequired: $('set-loginRequired').checked });
+  if (d.ok) { settings = d.settings; $('access-ok').textContent = d.settings.loginRequired ? 'Login is now required to use the service.' : 'Login is no longer required — the service is open.'; }
+  else $('access-err').textContent = d.error || 'Save failed.';
+});
+$('btn-save-access').addEventListener('click', async () => {
+  $('access-err').textContent = ''; $('access-ok').textContent = '';
+  const mode = document.querySelector('#signup-seg button.active').dataset.mode;
+  const d = await api('/api/admin/settings', 'PUT', {
+    signupMode: mode,
+    siteName: $('set-siteName').value.trim(),
+    siteUrl: $('set-siteUrl').value.trim(),
+  });
+  if (d.ok) { settings = d.settings; renderAccess(); $('access-ok').textContent = 'Saved.'; }
+  else $('access-err').textContent = d.error || 'Save failed.';
+});
+
+// ---------- users ----------
+async function loadUsers() {
+  const d = await api('/api/admin/users');
+  const box = $('users');
+  if (!d.users.length) { box.innerHTML = '<div class="empty">No users.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr>` +
+    d.users.map((u) => `<tr>
+      <td>${esc(u.name)}</td><td>${esc(u.email)}</td>
+      <td><span class="badge ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span></td>
+      <td>${u.disabled ? '<span class="badge off">disabled</span>' : '<span class="badge on">active</span>'}</td>
+      <td><div class="row-actions">
+        <button class="small secondary" data-act="role" data-id="${u.id}" data-role="${u.role}">Make ${u.role === 'admin' ? 'user' : 'admin'}</button>
+        <button class="small secondary" data-act="pw" data-id="${u.id}">Reset password</button>
+        <button class="small secondary" data-act="toggle" data-id="${u.id}">${u.disabled ? 'Enable' : 'Disable'}</button>
+        <button class="small danger" data-act="del" data-id="${u.id}">Delete</button>
+      </div></td></tr>`).join('') + `</table>`;
+  box.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => userAction(b)));
+}
+async function userAction(btn) {
+  const id = btn.dataset.id, act = btn.dataset.act;
+  $('users-err').textContent = ''; $('users-ok').textContent = '';
+  try {
+    if (act === 'role') {
+      const d = await api(`/api/admin/users/${id}`, 'PATCH', { role: btn.dataset.role === 'admin' ? 'user' : 'admin' });
+      if (!d.ok) throw new Error(d.error);
+      $('users-ok').textContent = 'Role updated.';
+    } else if (act === 'toggle') {
+      const disabling = btn.textContent.trim() === 'Disable';
+      if (disabling && !confirm('Disable this user? They will be signed out immediately.')) return;
+      const d = await api(`/api/admin/users/${id}`, 'PATCH', { disabled: disabling });
+      if (!d.ok) throw new Error(d.error);
+    } else if (act === 'del') {
+      if (!confirm('Delete this user permanently?')) return;
+      const d = await api(`/api/admin/users/${id}`, 'DELETE');
+      if (!d.ok) throw new Error(d.error);
+    } else if (act === 'pw') {
+      const pw = prompt('New password for this user (min. 8 characters):');
+      if (!pw) return;
+      const d = await api(`/api/admin/users/${id}`, 'PATCH', { password: pw });
+      if (!d.ok) throw new Error(d.error);
+      $('users-ok').textContent = 'Password reset. Tell the user their new password over a channel you trust.';
+    }
+    loadUsers();
+  } catch (e) { $('users-err').textContent = e.message || 'Action failed.'; }
+}
+$('btn-create-user').addEventListener('click', async () => {
+  $('users-err').textContent = ''; $('users-ok').textContent = '';
+  const d = await api('/api/admin/users', 'POST', {
+    name: $('nu-name').value.trim(), email: $('nu-email').value.trim(),
+    password: $('nu-password').value, role: $('nu-role').value,
+  });
+  if (!d.ok) { $('users-err').textContent = d.error || 'Create failed.'; return; }
+  $('users-ok').textContent = 'User created.';
+  $('nu-name').value = $('nu-email').value = $('nu-password').value = '';
+  loadUsers();
+});
+
+// ---------- invites ----------
+async function loadInvites() {
+  const d = await api('/api/admin/invites');
+  const box = $('invites');
+  if (!d.invites.length) { box.innerHTML = '<div class="empty">No invites yet. Create one above.</div>'; return; }
+  box.innerHTML = `<table><tr><th>Code</th><th>Note / email</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr>` +
+    d.invites.map((i) => {
+      const expired = i.expiresAt && i.expiresAt < Date.now();
+      const usedUp = i.uses >= i.maxUses;
+      const status = i.revoked ? '<span class="badge off">revoked</span>'
+        : expired ? '<span class="badge off">expired</span>'
+        : usedUp ? '<span class="badge">used up</span>'
+        : '<span class="badge on">active</span>';
+      return `<tr>
+        <td><span class="code-chip">${esc(i.code)}</span></td>
+        <td>${esc(i.note || i.email || '—')}</td>
+        <td>${i.uses}/${i.maxUses}</td>
+        <td>${i.expiresAt ? when(i.expiresAt) : 'never'}</td>
+        <td>${status}</td>
+        <td><div class="row-actions">
+          <button class="small secondary" data-inv="copy" data-link="${esc(i.link)}">Copy link</button>
+          <button class="small secondary" data-inv="send" data-code="${esc(i.code)}">Email…</button>
+          ${!i.revoked ? `<button class="small danger" data-inv="revoke" data-code="${esc(i.code)}">Revoke</button>` : ''}
+        </div></td></tr>`;
+    }).join('') + `</table>`;
+  box.querySelectorAll('button[data-inv]').forEach((b) => b.addEventListener('click', () => inviteAction(b)));
+}
+async function inviteAction(btn) {
+  const kind = btn.dataset.inv;
+  $('inv-err').textContent = ''; $('inv-ok').textContent = '';
+  if (kind === 'copy') {
+    const ok = await copyText(btn.dataset.link);
+    $('inv-ok').textContent = ok ? 'Invite link copied.' : 'Copy failed — copy it manually from the table.';
+  } else if (kind === 'revoke') {
+    if (!confirm('Revoke this invite?')) return;
+    const d = await api(`/api/admin/invites/${btn.dataset.code}/revoke`, 'POST', {});
+    if (!d.ok) { $('inv-err').textContent = d.error; return; }
+    loadInvites();
+  } else if (kind === 'send') {
+    const email = prompt('Email address to send this invite to:');
+    if (!email) return;
+    btn.disabled = true;
+    const d = await api(`/api/admin/invites/${btn.dataset.code}/send`, 'POST', { email: email.trim() });
+    btn.disabled = false;
+    if (!d.ok) { $('inv-err').textContent = d.error; return; }
+    $('inv-ok').textContent = `Invite sent to ${email.trim()}.`;
+    loadInvites();
+  }
+}
+$('btn-create-invite').addEventListener('click', async () => {
+  $('inv-err').textContent = ''; $('inv-ok').textContent = '';
+  const d = await api('/api/admin/invites', 'POST', {
+    note: $('inv-note').value.trim(), email: $('inv-email').value.trim(),
+    maxUses: $('inv-uses').value, expiresInDays: $('inv-days').value,
+  });
+  if (!d.ok) { $('inv-err').textContent = d.error || 'Create failed.'; return; }
+  $('inv-ok').textContent = `Invite created: ${d.code}`;
+  const ok = await copyText(d.link);
+  if (ok) $('inv-ok').textContent += ' — link copied to clipboard.';
+  $('inv-note').value = $('inv-email').value = '';
+  loadInvites();
+});
+
+// ---------- SMTP ----------
+function renderSmtp() {
+  const s = settings.smtp || {};
+  $('smtp-host').value = s.host || '';
+  $('smtp-port').value = s.port || 587;
+  $('smtp-enc').value = s.encryption || 'starttls';
+  $('smtp-user').value = s.user || '';
+  $('smtp-pass').value = '';
+  $('smtp-pass').placeholder = settings.smtpHasPass ? '•••••••• (saved — leave blank to keep)' : 'not set';
+  $('smtp-from').value = s.from || '';
+  $('smtp-insecure').checked = !!s.tlsInsecure;
+}
+$('btn-save-smtp').addEventListener('click', async () => {
+  $('smtp-err').textContent = ''; $('smtp-ok').textContent = '';
+  const pass = $('smtp-pass').value;
+  const d = await api('/api/admin/settings', 'PUT', {
+    smtp: {
+      host: $('smtp-host').value.trim(), port: $('smtp-port').value,
+      encryption: $('smtp-enc').value, user: $('smtp-user').value.trim(),
+      pass: pass ? pass : '__KEEP__', from: $('smtp-from').value.trim(),
+      tlsInsecure: $('smtp-insecure').checked,
+    },
+  });
+  if (!d.ok) { $('smtp-err').textContent = d.error || 'Save failed.'; return; }
+  settings = d.settings; renderSmtp();
+  $('smtp-ok').textContent = 'SMTP settings saved.';
+});
+$('btn-test-smtp').addEventListener('click', () => $('test-wrap').classList.toggle('hidden'));
+$('btn-do-test').addEventListener('click', async () => {
+  $('smtp-err').textContent = ''; $('smtp-ok').textContent = '';
+  const to = $('test-to').value.trim();
+  if (!to) { $('smtp-err').textContent = 'Enter an address to send the test to.'; return; }
+  const btn = $('btn-do-test');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const d = await api('/api/admin/smtp/test', 'POST', { to });
+  btn.disabled = false; btn.textContent = 'Send';
+  if (!d.ok) { $('smtp-err').textContent = d.error || 'Test failed.'; return; }
+  $('smtp-ok').textContent = `Test email sent to ${to}. Check the inbox (and spam).`;
+});
+
+// ---------- devices ----------
+async function loadDevices() {
+  const d = await api('/api/admin/devices');
+  const box = $('devices');
+  if (!d.devices.length) { box.innerHTML = '<div class="empty">No trusted devices.</div>'; return; }
+  box.innerHTML = `<table><tr><th>User</th><th>Device</th><th>Trusted</th><th>Last used</th><th></th></tr>` +
+    d.devices.map((x) => `<tr><td>${esc(x.email)}</td><td>${esc(x.name)}</td>
+      <td>${when(x.createdAt)}</td><td>${when(x.lastUsedAt)}</td>
+      <td><button class="small danger" data-dev="${x.id}">Revoke</button></td></tr>`).join('') + `</table>`;
+  box.querySelectorAll('button[data-dev]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Revoke this trusted device? It will have to sign in again.')) return;
+    await api(`/api/admin/devices/${b.dataset.dev}`, 'DELETE');
+    loadDevices();
+  }));
+}
+
+// ---------- transfers ----------
+async function loadTransfers() {
+  const d = await api('/api/admin/transfers');
+  const box = $('transfers');
+  if (!d.transfers.length) { box.innerHTML = '<div class="empty">No transfers yet.</div>'; return; }
+  box.innerHTML = `<table><tr><th>When</th><th>Who</th><th>Room</th><th>Locked</th></tr>` +
+    d.transfers.map((t) => `<tr><td>${when(t.at)}</td><td>${esc(t.email)}</td>
+      <td><span class="code-chip">${esc(t.roomId)}</span></td><td>${t.protected ? '🔒' : '—'}</td></tr>`).join('') + `</table>`;
+}
+
+// ---------- branding ----------
+function refreshLogoPreviews() {
+  for (const which of ['dark', 'light']) {
+    const box = $('preview-' + which);
+    const rmBtn = $('btn-logo-' + which + '-rm');
+    const img = new Image();
+    img.onload = () => {
+      box.innerHTML = '';
+      img.style.maxHeight = '56px';
+      img.style.maxWidth = '100%';
+      img.style.objectFit = 'contain';
+      box.appendChild(img);
+      rmBtn.classList.remove('hidden');
+    };
+    img.onerror = () => {
+      box.innerHTML = '<span class="empty">No logo</span>';
+      rmBtn.classList.add('hidden');
+    };
+    img.src = '/branding/logo-' + which + '?v=' + Date.now();
+  }
+}
+function setupLogoUpload(which) {
+  const fileInput = $('file-logo-' + which);
+  $('btn-logo-' + which).addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    $('brand-err').textContent = ''; $('brand-ok').textContent = '';
+    if (f.size > 500 * 1024) { $('brand-err').textContent = 'Logo must be under 500 KB.'; fileInput.value = ''; return; }
+    const btn = $('btn-logo-' + which);
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      });
+      const d = await api('/api/admin/branding', 'POST', { which, dataUrl });
+      if (!d.ok) { $('brand-err').textContent = d.error || 'Upload failed.'; }
+      else {
+        $('brand-ok').textContent = 'Logo saved.';
+        refreshLogoPreviews();
+        if (window.TFWTheme) TFWTheme.refreshLogo();
+      }
+    } catch { $('brand-err').textContent = 'Upload failed.'; }
+    btn.disabled = false; btn.textContent = 'Upload…';
+    fileInput.value = '';
+  });
+  $('btn-logo-' + which + '-rm').addEventListener('click', async () => {
+    if (!confirm('Remove this logo?')) return;
+    await api('/api/admin/branding/' + which, 'DELETE');
+    refreshLogoPreviews();
+    if (window.TFWTheme) TFWTheme.refreshLogo();
+  });
+}
+$('btn-save-branding').addEventListener('click', async () => {
+  $('brand-err').textContent = ''; $('brand-ok').textContent = '';
+  const d = await api('/api/admin/settings', 'PUT', {
+    branding: { showIcon: $('brand-show-icon').checked, showText: $('brand-show-text').checked },
+  });
+  if (!d.ok) { $('brand-err').textContent = d.error || 'Save failed.'; return; }
+  settings = d.settings;
+  $('brand-ok').textContent = 'Branding saved.';
+  if (window.TFWTheme) TFWTheme.applyBranding();
+});
+
+// ---------- init ----------
+(async () => {
+  try {
+    const b = await (await fetch('/api/bootstrap')).json();
+    if (!b.setupDone) { location.href = '/setup.html'; return; }
+    if (!b.user || b.user.role !== 'admin') { location.href = '/login.html'; return; }
+    me = b.user;
+    $('me-badge').textContent = `admin · ${me.email}`;
+    if (b.siteName) document.title = 'Admin panel — ' + b.siteName;
+    const d = await api('/api/admin/settings');
+    settings = d.settings;
+    renderAccess(); renderSmtp();
+    $('brand-show-icon').checked = !d.settings.branding || d.settings.branding.showIcon !== false;
+    $('brand-show-text').checked = !d.settings.branding || d.settings.branding.showText !== false;
+    loadUsers(); loadInvites(); loadDevices(); loadTransfers();
+    setupLogoUpload('dark'); setupLogoUpload('light'); refreshLogoPreviews();
+  } catch { /* redirected */ }
+
+  $('btn-logout').addEventListener('click', async () => {
+    await api('/api/logout', 'POST', {});
+    location.href = '/login.html';
+  });
+})();
+</script>
+</body>
+</html>

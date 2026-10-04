@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Create account — Tunnel File Wizard</title>
+<link rel="stylesheet" href="/app.css" />
+<script src="/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="topbar">
+      <a class="brand" href="/"><img id="brand-logo" class="brand-logo" alt="" /><span class="dot"></span><span class="brand-text">Tunnel File Wizard</span></a>
+      <button type="button" class="mode-toggle" id="mode-toggle" aria-label="Toggle light and dark mode"><span id="mode-icon">🌙</span></button>
+    </div>
+    <h1 id="title">Create your account</h1>
+    <p class="sub" id="subtitle"></p>
+  </header>
+
+  <div class="panel">
+    <div class="field hidden" id="invite-field">
+      <label for="invite">Invite code</label>
+      <input type="text" id="invite" class="mono" placeholder="e.g. K7Q2M9XD4P1A" autocapitalize="characters" autocomplete="off" spellcheck="false" />
+      <div class="hint">This server is invite-only. Paste the code from your invite email or link.</div>
+    </div>
+    <div class="field">
+      <label for="name">Your name</label>
+      <input type="text" id="name" autocomplete="name" placeholder="e.g. Alex" />
+    </div>
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="email" placeholder="you@example.com" />
+    </div>
+    <div class="field">
+      <label for="password">Password (min. 8 characters)</label>
+      <input type="password" id="password" autocomplete="new-password" />
+    </div>
+    <div class="err" id="err"></div>
+    <button id="btn">Create account</button>
+    <p class="muted-link" style="margin-top:14px">Already have an account? <a href="/login.html">Sign in</a></p>
+  </div>
+
+  <footer><a href="/">← Back to file transfer</a></footer>
+</div>
+
+<script>
+(async () => {
+  const err = document.getElementById('err');
+  const params = new URLSearchParams(location.search);
+  const inviteFromLink = (params.get('invite') || '').trim().toUpperCase();
+
+  try {
+    const b = await (await fetch('/api/bootstrap')).json();
+    if (!b.setupDone) { location.href = '/setup.html'; return; }
+    if (b.user) { location.href = '/'; return; }
+    if (b.siteName) {
+      document.title = 'Create account — ' + b.siteName;
+      document.getElementById('subtitle').textContent = 'Create an account on ' + b.siteName + '.';
+    }
+    const needInvite = b.loginRequired && b.signupMode === 'invite';
+    document.getElementById('invite-field').classList.toggle('hidden', !needInvite);
+    if (inviteFromLink) document.getElementById('invite').value = inviteFromLink;
+    if (needInvite && !inviteFromLink) {
+      document.getElementById('subtitle').textContent =
+        'This server is invite-only — you need an invite code from the admin to create an account.';
+    } else if (!b.loginRequired) {
+      document.getElementById('subtitle').textContent =
+        'Accounts are optional on this server, but one lets you keep a profile and see your transfer history.';
+    }
+  } catch {}
+
+  document.getElementById('btn').addEventListener('click', async () => {
+    err.textContent = '';
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/signup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: document.getElementById('name').value.trim(),
+          email: document.getElementById('email').value.trim(),
+          password: document.getElementById('password').value,
+          invite: document.getElementById('invite').value.trim(),
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { err.textContent = d.error || 'Sign-up failed.'; btn.disabled = false; return; }
+      location.href = '/';
+    } catch { err.textContent = 'Could not reach the server.'; btn.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>

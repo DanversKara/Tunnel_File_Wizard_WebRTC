@@ -1,0 +1,49 @@
+services:
+  signaling:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist accounts, invites, settings, and the transfer log.
+      - ./data:/app/data
+    environment:
+      - PORT=3000
+      # --- Accounts (all optional; the admin panel can set these too) ---
+      # First-run values only: once the admin changes them in the panel,
+      # the panel's values win and these are ignored.
+      # - LOGIN_REQUIRED=1        # require sign-in to send/receive files
+      # - SIGNUP_MODE=invite      # invite | public (only when login is required)
+      # - SITE_URL=https://files.example.com  # used for links in emails
+      # --- SMTP: your own mail server (for invites + password resets) ---
+      # - SMTP_HOST=mail.example.com
+      # - SMTP_PORT=587
+      # - SMTP_ENCRYPTION=starttls  # starttls | ssl | none
+      # - SMTP_USER=you@example.com
+      # - SMTP_PASS=secret
+      # - SMTP_FROM=Tunnel File Wizard <files@example.com>
+      # --- Cookies ---
+      # - COOKIE_SECURE=auto      # auto | 1 | 0 — secure cookies need HTTPS
+      # Uncomment these three, and the coturn service below, if you need
+      # TURN fallback for clients behind strict NATs. Leaving TURN off
+      # keeps every transfer strictly peer-to-peer, at the cost of some
+      # connections failing on hostile networks.
+      # - TURN_URL=turn:your-server-ip:3478
+      # - TURN_USERNAME=tunnel-file-wizard
+      # - TURN_CREDENTIAL=changeme
+    restart: unless-stopped
+
+  # Optional TURN relay (coturn). Only needed as a fallback for networks
+  # where direct P2P negotiation fails (symmetric NAT, some corporate/
+  # mobile networks). Traffic relayed through TURN does pass through
+  # this server — that's a deliberate exception to "never touches a
+  # server," so decide with that tradeoff in mind.
+  # coturn:
+  #   image: coturn/coturn:latest
+  #   network_mode: host
+  #   command: >
+  #     -n --log-file=stdout
+  #     --listening-port=3478
+  #     --min-port=49160 --max-port=49200
+  #     --realm=tunnel-file-wizard
+  #     --user=tunnel-file-wizard:changeme
+  #   restart: unless-stopped
