@@ -60,6 +60,7 @@
   <div class="panel">
     <h2>This device</h2>
     <p class="desc" id="trust-desc">Checking…</p>
+    <div class="ok-msg" id="t-ok"></div>
     <div class="btn-row">
       <button class="secondary" id="btn-trust">Trust this device</button>
       <button class="secondary hidden" id="btn-untrust">Forget this device</button>
@@ -78,9 +79,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
-function hasDeviceCookie() {
-  return document.cookie.split(';').some((c) => c.trim().startsWith('tfw_device='));
-}
+// NOTE: the device cookie is HttpOnly, so JS can't see it in document.cookie.
+// Whether this device is trusted comes from the server (/api/me → deviceTrusted).
 
 async function api(path, method, body) {
   const r = await fetch(path, {
@@ -94,12 +94,17 @@ async function api(path, method, body) {
 }
 
 (async () => {
-  let me;
-  try {
-    const { data } = await api('/api/me');
-    if (!data.ok) { location.href = '/login.html'; return; }
-    me = data.user;
-  } catch { return; }
+  let me, deviceTrusted = false;
+  async function refreshMe() {
+    try {
+      const { data } = await api('/api/me');
+      if (!data.ok) { location.href = '/login.html'; return false; }
+      me = data.user;
+      deviceTrusted = !!data.deviceTrusted;
+      return true;
+    } catch { return false; }
+  }
+  if (!await refreshMe()) return;
 
   $('hello').textContent = `Signed in as ${me.name} (${me.email})`;
   $('name').value = me.name;
@@ -107,7 +112,7 @@ async function api(path, method, body) {
   if (me.role === 'admin') $('admin-link').classList.remove('hidden');
 
   function refreshTrustUI() {
-    const trusted = hasDeviceCookie();
+    const trusted = deviceTrusted;
     $('btn-trust').classList.toggle('hidden', trusted);
     $('btn-untrust').classList.toggle('hidden', !trusted);
     $('trust-desc').textContent = trusted
@@ -140,12 +145,19 @@ async function api(path, method, body) {
   });
 
   $('btn-trust').addEventListener('click', async () => {
-    await api('/api/me/device/trust', 'POST', { name: navigator.platform || 'browser' });
+    $('t-ok').textContent = '';
+    const { data } = await api('/api/me/device/trust', 'POST', { name: navigator.platform || 'browser' });
+    if (!data.ok) return;
+    await refreshMe();
     refreshTrustUI();
+    $('t-ok').textContent = 'This device is now trusted — you will not need your password on your next visit.';
   });
   $('btn-untrust').addEventListener('click', async () => {
+    $('t-ok').textContent = '';
     await api('/api/me/device/forget', 'POST', {});
+    await refreshMe();
     refreshTrustUI();
+    $('t-ok').textContent = 'This device is no longer trusted — you will sign in with your password.';
   });
 
   // My transfers

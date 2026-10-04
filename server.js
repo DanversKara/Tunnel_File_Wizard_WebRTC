@@ -228,6 +228,17 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Does this request carry a valid trusted-device cookie? (The cookie is
+// HttpOnly, so the browser JS can't check it itself — the server reports it.)
+function requestDeviceTrusted(req, db) {
+  const tok = parseCookies(req)[DEVICE_COOKIE];
+  if (!tok) return false;
+  const d = db.devices[store.tokenHash(tok)];
+  if (!d) return false;
+  const user = db.users.find((u) => u.id === d.userId);
+  return !!(user && !user.disabled);
+}
+
 // --- public API ---------------------------------------------------------------
 app.get('/api/bootstrap', (req, res) => {
   const db = store.load();
@@ -356,7 +367,8 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', requireLogin, (req, res) => {
-  res.json({ ok: true, user: req.user });
+  const db = store.load();
+  res.json({ ok: true, user: req.user, deviceTrusted: requestDeviceTrusted(req, db) });
 });
 
 // Update own display name.
@@ -634,11 +646,13 @@ app.post('/api/admin/invites/:code/send', requireAdmin, async (req, res) => {
 app.get('/api/admin/devices', requireAdmin, (req, res) => {
   const db = store.load();
   const byId = Object.fromEntries(db.users.map((u) => [u.id, u.email]));
+  const myHash = store.tokenHash(parseCookies(req)[DEVICE_COOKIE] || '');
   res.json({
     ok: true,
     devices: Object.entries(db.devices).map(([h, d]) => ({
       id: h.slice(0, 16), email: byId[d.userId] || '(deleted user)',
       name: d.name, createdAt: d.createdAt, lastUsedAt: d.lastUsedAt,
+      current: h === myHash,
     })).sort((a, b) => b.lastUsedAt - a.lastUsedAt),
   });
 });
@@ -650,6 +664,15 @@ app.delete('/api/admin/devices/:id', requireAdmin, (req, res) => {
   delete db.devices[key];
   store.save();
   res.json({ ok: true });
+});
+
+// Revoke ALL trusted devices (admin cleanup). Every device signs in again.
+app.post('/api/admin/devices/clear', requireAdmin, (req, res) => {
+  const db = store.load();
+  const cleared = Object.keys(db.devices).length;
+  db.devices = {};
+  if (cleared) store.save();
+  res.json({ ok: true, cleared });
 });
 
 // Settings (login-required toggle, signup mode, SMTP, site info)

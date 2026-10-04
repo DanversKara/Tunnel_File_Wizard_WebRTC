@@ -434,8 +434,16 @@ async function loadDevices() {
   const d = await api('/api/admin/devices');
   const box = $('devices');
   if (!d.devices.length) { box.innerHTML = '<div class="empty">No trusted devices.</div>'; return; }
-  box.innerHTML = `<table><tr><th>User</th><th>Device</th><th>Trusted</th><th>Last used</th><th></th></tr>` +
-    d.devices.map((x) => `<tr><td>${esc(x.email)}</td><td>${esc(x.name)}</td>
+  box.innerHTML =
+    `<div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="small secondary" id="btn-dev-selected" style="width:auto">Revoke selected</button>
+      <button class="small secondary" id="btn-dev-clear" style="width:auto">Clear all</button>
+    </div>` +
+    `<table><tr><th></th><th>User</th><th>Device</th><th>Trusted</th><th>Last used</th><th></th></tr>` +
+    d.devices.map((x) => `<tr>
+      <td><input type="checkbox" data-dev-check="${x.id}" aria-label="Select device" /></td>
+      <td>${esc(x.email)}${x.current ? ' <span class="badge on">this device</span>' : ''}</td>
+      <td>${esc(x.name)}</td>
       <td>${when(x.createdAt)}</td><td>${when(x.lastUsedAt)}</td>
       <td><button class="small danger" data-dev="${x.id}">Revoke</button></td></tr>`).join('') + `</table>`;
   box.querySelectorAll('button[data-dev]').forEach((b) => b.addEventListener('click', async () => {
@@ -443,6 +451,19 @@ async function loadDevices() {
     await api(`/api/admin/devices/${b.dataset.dev}`, 'DELETE');
     loadDevices();
   }));
+  $('btn-dev-selected').addEventListener('click', async () => {
+    const ids = [...box.querySelectorAll('input[data-dev-check]:checked')].map((c) => c.dataset.devCheck);
+    if (!ids.length) return;
+    if (!confirm(`Revoke ${ids.length} selected device${ids.length === 1 ? '' : 's'}? They will have to sign in again.`)) return;
+    for (const id of ids) { await api(`/api/admin/devices/${id}`, 'DELETE'); }
+    loadDevices();
+  });
+  $('btn-dev-clear').addEventListener('click', async () => {
+    if (!confirm('Revoke ALL trusted devices? Every device will have to sign in again.')) return;
+    const r = await api('/api/admin/devices/clear', 'POST', {});
+    if (!r.data.ok) { alert(r.data.error || 'Clear failed.'); return; }
+    loadDevices();
+  });
 }
 
 // ---------- transfers ----------
