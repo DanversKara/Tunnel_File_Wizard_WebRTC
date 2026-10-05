@@ -931,7 +931,9 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => { ws.isAlive = true; });
 
   // The admin's anti-abuse switch: when "Login required" is ON, anonymous
-  // sockets can't create or join rooms at all.
+  // sockets can't CREATE rooms. Joining is always by room code — the code
+  // (+ optional password) is the credential, like a shared link — so anyone
+  // with a link can join without an account.
   function gated() {
     if (store.load().settings.loginRequired && !wsUser) {
       ws.send(JSON.stringify(LOGIN_REQUIRED_WS_ERROR));
@@ -1003,7 +1005,8 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'join': {
-        if (gated()) return;
+        // No login gate here: the room code (+ optional password) is the
+        // credential. Anyone holding a shared link joins without an account.
         const roomId = String(msg.roomId || '').trim().toLowerCase();
         const room = rooms.get(roomId);
         if (!room || room.peers.size >= 2) {

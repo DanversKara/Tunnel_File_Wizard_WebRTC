@@ -249,24 +249,6 @@
     color: var(--accent); display: inline-flex; align-items: center; justify-content: center;
     font-size: 12px; font-weight: 700; flex-shrink: 0;
   }
-  .lock-overlay {
-    position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
-    background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(6px); padding: 20px;
-  }
-  .lock-card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
-    padding: 36px 32px; max-width: 400px; width: 100%; text-align: center;
-    animation: panelIn .4s cubic-bezier(.16,1,.3,1);
-  }
-  .lock-card .lock-icon { font-size: 40px; }
-  .lock-card h2 { margin: 14px 0 8px; font-size: 20px; }
-  .lock-card p { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0 0 6px; }
-  .lock-card .btn-row { margin-top: 18px; }
-  .lock-card a.btn-link {
-    flex: 1; text-align: center; text-decoration: none; padding: 12px 0; border-radius: 9px;
-    background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 14px;
-  }
-  .lock-card a.btn-link.secondary { background: transparent; border: 1px solid var(--line); color: var(--text); }
 </style>
 </head>
 <body>
@@ -386,19 +368,6 @@
   <footer>Files never pass through a server. Close either tab and the transfer stops. · <span class="app-version" id="app-version"></span></footer>
 </div>
 
-<!-- shown when the admin requires sign-in and the visitor isn't signed in -->
-<div class="lock-overlay hidden" id="lock-overlay">
-  <div class="lock-card">
-    <div class="lock-icon">🔒</div>
-    <h2>Sign in required</h2>
-    <p id="lock-text">The admin of this server requires everyone to sign in before sending or receiving files.</p>
-    <div class="btn-row">
-      <a href="/login.html" class="btn-link">Sign in</a>
-      <a href="/signup.html" class="btn-link secondary" id="lock-signup">Create account</a>
-    </div>
-  </div>
-</div>
-
 <script src="/brand.js"></script>
 <script>
 (() => {
@@ -406,12 +375,7 @@
   if (window.TFWBrand) TFWBrand.mount();
   // ---------- accounts: sign-in state + the admin's login-required gate ----------
   const authArea = document.getElementById('auth-area');
-  const lockOverlay = document.getElementById('lock-overlay');
   let signedInUser = null;
-
-  function showLock() {
-    lockOverlay.classList.remove('hidden');
-  }
 
   function renderAuthArea() {
     authArea.innerHTML = '';
@@ -459,11 +423,10 @@
     // version) is owned by the universal brand component (public/brand.js).
     if (window.TFWBrand) TFWBrand.applyBranding(b);
     renderAuthArea();
-    // The admin's anti-abuse switch: when login is required and this visitor
-    // isn't signed in, the whole transfer UI sits behind the lock screen.
-    // (The server enforces the same rule on the WebSocket, so this isn't
-    // just cosmetic.)
-    if (b.loginRequired && !signedInUser) showLock();
+    // No blocking sign-in popup: anyone holding a shared link/code joins
+    // without an account (the code is the credential). Actions that need
+    // sign-in (creating a room when login is required) report it inline
+    // via the status line instead.
   }
   initAuth();
 
@@ -854,7 +817,6 @@
       }
 
       if (msg.type === 'error') {
-        if (msg.code === 'LOGIN_REQUIRED') showLock();
         setStatus(sendStatus, msg.message, true);
         setConnBadge('send', 'bad', 'Could not create transfer');
         btnCreate.disabled = false;
@@ -1082,7 +1044,6 @@
       }
 
       if (msg.type === 'error') {
-        if (msg.code === 'LOGIN_REQUIRED') showLock();
         setStatus(recvStatus, msg.message, true);
         setConnBadge('recv', 'bad', 'Could not connect');
         btnJoin.disabled = false;
