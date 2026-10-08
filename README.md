@@ -156,6 +156,8 @@ If you need resumable transfers for very large or very long-running files, that'
 - **Optional password protection** — hashed with `scrypt` server-side, checked before a receiver is allowed to join the room. This gates *access to the room*, on top of the code; it is not an additional encryption layer on the file (WebRTC's own DTLS-SRTP already handles that).
 - **Themes** — the sender picks a palette; it's applied on the receiver's screen too, synced via the signaling server as plain metadata. Each theme has both a light and dark variant (see [Light/dark mode & theme animation](#lightdark-mode--theme-animation) below), and a soft animated background tinted to the current theme.
 - **Live connection status** on both sides, driven by the real WebRTC connection state, not just "a WebSocket said someone's here."
+- **Transfer timer with ETA** — the moment the direct link opens, both sides show a live elapsed timer plus a rate-based ETA and projected finish time (e.g. `⏱ 02:35 elapsed · ETA ~4 min (done ~14:32)`).
+- **Multiple files per transfer** — select or drop as many files as you like (up to 100, each within the size limit); they stream one after another over the same connection and the receiver's browser downloads each file the moment it completes, one by one.
 - **Explicit stay-connected warnings** and a real "are you sure you want to leave" browser prompt during an active transfer.
 
 ## Light/dark mode & theme animation

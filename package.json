@@ -1,6 +1,6 @@
 {
   "name": "tunnel-file-wizard",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Browser-based peer-to-peer file transfer over WebRTC. Signaling only — file bytes never touch this server.",
   "main": "server.js",
   "scripts": {

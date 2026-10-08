@@ -195,6 +195,15 @@
   .progress-label.on { display: block; }
   .progress-label strong { color: var(--text); font-weight: 600; }
 
+  /* transfer timer: "⏱ 02:35 elapsed · ETA ~4 min (done ~14:32)" — a plain
+     elapsed/ETA readout shown on both sides from the moment the data
+     channel opens. Separate from the progress bar. */
+  .timer-label {
+    display: none; margin-top: 6px; font-size: 12.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .timer-label.on { display: block; }
+
   .meta { margin-top: 10px; font-size: 13px; color: var(--muted); }
 
   .sender-info {
@@ -274,10 +283,10 @@
   <!-- SEND -->
   <div class="panel" id="panel-send">
     <div class="drop" id="drop">
-      <p id="drop-label">Click to choose a file, or drop it here</p>
+      <p id="drop-label">Click to choose file(s), or drop them here</p>
       <div class="fname hidden" id="fname"></div>
     </div>
-    <input type="file" id="file-input" />
+    <input type="file" id="file-input" multiple />
 
     <div class="field">
       <label>Theme the receiver sees</label>
@@ -326,6 +335,7 @@
 
     <div class="progress" id="send-progress"><div class="progress-fill" id="send-progress-fill"></div></div>
     <div class="progress-label" id="send-progress-label"></div>
+    <div class="timer-label" id="send-timer-label"></div>
     <div class="status" id="send-status"></div>
 
     <div class="warn-banner" id="send-warn">
@@ -356,6 +366,7 @@
 
     <div class="progress" id="recv-progress"><div class="progress-fill" id="recv-progress-fill"></div></div>
     <div class="progress-label" id="recv-progress-label"></div>
+    <div class="timer-label" id="recv-timer-label"></div>
     <div class="meta hidden" id="recv-meta"></div>
     <div class="status" id="recv-status"></div>
 
@@ -546,7 +557,8 @@
   })();
 
   let ws, pc, dc, iceServers = [];
-  let selectedFile = null;
+  let selectedFiles = [];
+  const sendState = { sentBytes: 0, totalBytes: 0 }; // live counters feeding the send-side timer/ETA
   let currentRoomId = null;
   let currentPassword = '';
   let transferActive = false; // guards the beforeunload warning
@@ -738,29 +750,43 @@
     })
   );
   drop.addEventListener('drop', (e) => {
-    if (e.dataTransfer.files.length) setSelectedFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files.length) setSelectedFiles(e.dataTransfer.files);
   });
   fileInput.addEventListener('change', () => {
-    if (fileInput.files.length) setSelectedFile(fileInput.files[0]);
+    if (fileInput.files.length) setSelectedFiles(fileInput.files);
   });
 
-  function setSelectedFile(file) {
+  const MAX_FILES_PER_TRANSFER = 100;
+  function setSelectedFiles(fileList) {
     const fnameEl = document.getElementById('fname');
     fnameEl.classList.remove('bad');
+    const files = Array.from(fileList);
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      selectedFile = null;
-      fnameEl.textContent = `${file.name} (${formatBytes(file.size)}) — over the ${formatBytes(MAX_FILE_SIZE_BYTES)} limit for this deployment.`;
+    const tooBig = files.filter(f => f.size > MAX_FILE_SIZE_BYTES);
+    let ok = files.filter(f => f.size <= MAX_FILE_SIZE_BYTES);
+    if (ok.length > MAX_FILES_PER_TRANSFER) {
+      tooBig.push(...ok.slice(MAX_FILES_PER_TRANSFER));
+      ok = ok.slice(0, MAX_FILES_PER_TRANSFER);
+    }
+    selectedFiles = ok;
+
+    if (!ok.length) {
+      fnameEl.textContent = tooBig.length
+        ? `${tooBig.map(f => f.name).join(', ')} — over the ${formatBytes(MAX_FILE_SIZE_BYTES)} limit for this deployment.`
+        : 'No files selected.';
       fnameEl.classList.remove('hidden');
       fnameEl.classList.add('bad');
       btnCreate.disabled = true;
       return;
     }
 
-    selectedFile = file;
-    fnameEl.textContent = `${file.name} (${formatBytes(file.size)})`;
+    const totalBytes = ok.reduce((a, f) => a + f.size, 0);
+    const shown = ok.slice(0, 3).map(f => f.name).join(', ');
+    const more = ok.length > 3 ? ` and ${ok.length - 3} more` : '';
+    const skipped = tooBig.length ? ` (${tooBig.length} skipped: over size/count limit)` : '';
+    fnameEl.textContent = `${ok.length} file${ok.length > 1 ? 's' : ''} selected (${formatBytes(totalBytes)}): ${shown}${more}${skipped}`;
     fnameEl.classList.remove('hidden');
-    document.getElementById('drop-label').textContent = 'Change file';
+    document.getElementById('drop-label').textContent = 'Change files';
     btnCreate.disabled = false;
   }
 
@@ -786,6 +812,7 @@
     setConnBadge('send', 'waiting', 'Setting up…');
     sendProgressFill.style.width = '0%';
     sendProgressLabel.classList.remove('on');
+    stopTransferTimer('send');
     await loadIceConfig();
     await connectSignaling();
 
@@ -836,7 +863,8 @@
         dc.binaryType = 'arraybuffer';
         dc.onopen = () => {
           setConnBadge('send', 'good', 'Receiver connected');
-          sendFileOverChannel(dc, selectedFile);
+          startTransferTimer('send', () => ({ done: sendState.sentBytes, total: sendState.totalBytes }));
+          sendFilesOverChannel(dc, selectedFiles);
         };
         dc.onclose = () => handleChannelClosed('send');
 
@@ -901,48 +929,77 @@
     }
   });
 
-  function sendFileOverChannel(channel, file) {
-    setStatus(sendStatus, `Sending ${file.name}…`);
+  // Sends every selected file back-to-back over one data channel. The
+  // receiver downloads each file the moment it completes (1 by 1) — no
+  // zipping step, so memory stays flat no matter how many files are queued.
+  function sendFilesOverChannel(channel, files) {
+    sendState.sentBytes = 0;
+    sendState.totalBytes = files.reduce((a, f) => a + f.size, 0);
+    const multi = files.length > 1;
+    setStatus(sendStatus, multi ? `Sending 1 of ${files.length}…` : `Sending ${files[0].name}…`);
     sendProgress.classList.add('on');
     sendProgressLabel.classList.add('on');
-    updateProgressLabel(sendProgressLabel, 0, file.size);
+    updateProgressLabel(sendProgressLabel, 0, sendState.totalBytes, multi ? 'File 1 of ' + files.length + ' · ' : '');
     transferActive = true;
 
-    const meta = { type: 'meta', name: file.name, size: file.size, mime: file.type || 'application/octet-stream' };
-    channel.send(JSON.stringify(meta));
+    let chain = Promise.resolve();
+    files.forEach((file, i) => {
+      chain = chain.then(() => {
+        if (channel.readyState !== 'open') throw new Error('closed');
+        if (multi) setStatus(sendStatus, `Sending file ${i + 1} of ${files.length}: ${file.name}…`);
+        channel.send(JSON.stringify({
+          type: 'meta', name: file.name, size: file.size,
+          mime: file.type || 'application/octet-stream',
+          index: i + 1, total: files.length
+        }));
+        return streamFile(channel, file, (n) => {
+          sendState.sentBytes += n;
+          const pct = sendState.totalBytes > 0
+            ? Math.min(100, Math.round((sendState.sentBytes / sendState.totalBytes) * 100)) : 100;
+          sendProgressFill.style.width = pct + '%';
+          updateProgressLabel(sendProgressLabel, sendState.sentBytes, sendState.totalBytes,
+            multi ? `File ${i + 1} of ${files.length} · ` : '');
+        }).then(() => {
+          if (channel.readyState === 'open') channel.send(JSON.stringify({ type: 'done' }));
+        });
+      });
+    });
+    chain.then(() => {
+      if (channel.readyState === 'open') channel.send(JSON.stringify({ type: 'all-done', count: files.length }));
+      transferActive = false;
+      stopTransferTimer('send', true);
+      setStatus(sendStatus, multi ? `All ${files.length} files sent.` : 'Transfer complete.', false, true);
+    }).catch(() => {
+      // connection dropped mid-send; handleChannelClosed('send') owns the UI from here
+    });
+  }
 
-    let offset = 0;
-    const reader = new FileReader();
-
-    function sendNextChunk() {
-      if (channel.readyState !== 'open') return; // connection dropped mid-send
-      if (offset >= file.size) {
-        channel.send(JSON.stringify({ type: 'done' }));
-        transferActive = false;
-        setStatus(sendStatus, 'Transfer complete.', false, true);
-        return;
+  // Streams one file in 64KB chunks with backpressure. Resolves when the
+  // whole file has been handed to the data channel.
+  function streamFile(channel, file, onChunk) {
+    return new Promise((resolve) => {
+      let offset = 0;
+      const reader = new FileReader();
+      function sendNextChunk() {
+        if (channel.readyState !== 'open') { resolve(); return; } // dropped; outer catch handles UI
+        if (offset >= file.size) { resolve(); return; }
+        // Back off if the channel's send buffer is filling up faster
+        // than the network can drain it.
+        if (channel.bufferedAmount > BUFFER_HIGH_WATER) {
+          setTimeout(sendNextChunk, 50);
+          return;
+        }
+        reader.readAsArrayBuffer(file.slice(offset, offset + CHUNK_SIZE));
       }
-      // Back off if the channel's send buffer is filling up faster
-      // than the network can drain it.
-      if (channel.bufferedAmount > BUFFER_HIGH_WATER) {
-        setTimeout(sendNextChunk, 50);
-        return;
-      }
-      const slice = file.slice(offset, offset + CHUNK_SIZE);
-      reader.readAsArrayBuffer(slice);
-    }
-
-    reader.onload = () => {
-      if (channel.readyState !== 'open') return;
-      channel.send(reader.result);
-      offset += reader.result.byteLength;
-      const pct = Math.min(100, Math.round((offset / file.size) * 100));
-      sendProgressFill.style.width = pct + '%';
-      updateProgressLabel(sendProgressLabel, offset, file.size);
+      reader.onload = () => {
+        if (channel.readyState !== 'open') { resolve(); return; }
+        channel.send(reader.result);
+        offset += reader.result.byteLength;
+        onChunk(reader.result.byteLength);
+        sendNextChunk();
+      };
       sendNextChunk();
-    };
-
-    sendNextChunk();
+    });
   }
 
   // =====================================================================
@@ -991,6 +1048,7 @@
     setConnBadge('recv', 'waiting', 'Connecting…');
     recvProgressFill.style.width = '0%';
     recvProgressLabel.classList.remove('on');
+    stopTransferTimer('recv');
     await loadIceConfig();
     await connectSignaling();
 
@@ -1001,7 +1059,10 @@
     pc = newPeerConnection((channel) => {
       dc = channel;
       dc.binaryType = 'arraybuffer';
-      dc.onopen = () => setConnBadge('recv', 'good', 'Connected to sender');
+      dc.onopen = () => {
+        setConnBadge('recv', 'good', 'Connected to sender');
+        startTransferTimer('recv', () => ({ done: receivedBytes, total: (incomingMeta && incomingMeta.size) || 0 }));
+      };
       dc.onclose = () => handleChannelClosed('recv');
       dc.onmessage = (e) => {
         if (typeof e.data === 'string') {
@@ -1011,15 +1072,31 @@
             receivedBytes = 0;
             chunks = [];
             transferActive = true;
-            recvMeta.textContent = `Receiving ${msg.name} (${formatBytes(msg.size)})`;
+            const total = msg.total || 1, index = msg.index || 1;
+            const countPrefix = total > 1 ? `File ${index} of ${total} — ` : '';
+            recvMeta.textContent = `Receiving ${countPrefix}${msg.name} (${formatBytes(msg.size)})`;
             recvMeta.classList.remove('hidden');
             recvProgress.classList.add('on');
             recvProgressLabel.classList.add('on');
-            updateProgressLabel(recvProgressLabel, 0, incomingMeta.size || 0);
+            updateProgressLabel(recvProgressLabel, 0, incomingMeta.size || 0,
+              total > 1 ? `File ${index} of ${total} · ` : '');
             setStatus(recvStatus, 'Transferring…');
           } else if (msg.type === 'done') {
+            const total = (incomingMeta && incomingMeta.total) || 1;
+            const index = (incomingMeta && incomingMeta.index) || 1;
+            const moreComing = index < total;
+            transferActive = moreComing; // keep the beforeunload guard between files
+            finishDownload(incomingMeta, chunks, moreComing);
+            if (moreComing) {
+              setStatus(recvStatus, `Saved ${incomingMeta.name} — waiting for file ${index + 1} of ${total}…`);
+            } else {
+              stopTransferTimer('recv', true);
+            }
+          } else if (msg.type === 'all-done') {
             transferActive = false;
-            finishDownload(incomingMeta, chunks);
+            stopTransferTimer('recv', true);
+            setStatus(recvStatus,
+              (msg.count > 1 ? `All ${msg.count} files received.` : 'Download complete.'), false, true);
           }
         } else {
           chunks.push(e.data);
@@ -1073,7 +1150,7 @@
     joinRoom(joinCodeInput.value.trim(), joinPwInput.value);
   });
 
-  function finishDownload(meta, chunks) {
+  function finishDownload(meta, chunks, moreComing) {
     const blob = new Blob(chunks, { type: meta.mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1083,7 +1160,7 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    setStatus(recvStatus, 'Download complete.', false, true);
+    if (!moreComing) setStatus(recvStatus, 'Download complete.', false, true);
   }
 
   // ---------- shared connection-state handling ----------
@@ -1110,6 +1187,7 @@
     if (lostAlready[side]) return; // avoid re-firing on multiple events
     lostAlready[side] = true;
     transferActive = false;
+    stopTransferTimer(side);
 
     const statusEl = side === 'send' ? sendStatus : recvStatus;
     const wasTransferring = (side === 'send' ? sendProgress : recvProgress).classList.contains('on');
@@ -1124,18 +1202,91 @@
 
     // Let them retry without a full page reload.
     if (side === 'send') {
-      btnCreate.disabled = !selectedFile;
+      btnCreate.disabled = !selectedFiles.length;
     } else {
       btnJoin.disabled = false;
     }
   }
 
+  // ---------- transfer timers ----------
+  // A plain elapsed-time readout (NOT a progress bar) shown on both sides
+  // from the moment the WebRTC data channel opens, plus a rate-based ETA
+  // and the projected finish clock time/date once enough data has moved
+  // to estimate reliably.
+  const timers = {};
+  function formatClock(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    const p2 = (n) => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${p2(m)}:${p2(sec)}` : `${p2(m)}:${p2(sec)}`;
+  }
+  function formatEta(etaMs) {
+    const s = Math.round(etaMs / 1000);
+    if (s < 60) return `~${s} sec`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `~${m} min`;
+    return `~${Math.floor(m / 60)}h ${m % 60}m`;
+  }
+  function formatFinishTime(whenMs) {
+    const d = new Date(whenMs);
+    const now = new Date();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (d.toDateString() === now.toDateString()) return time;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    if (d.toDateString() === tomorrow.toDateString()) return `tomorrow ${time}`;
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+  }
+  function startTransferTimer(side, statsFn) {
+    stopTransferTimer(side);
+    const labelEl = document.getElementById(side === 'send' ? 'send-timer-label' : 'recv-timer-label');
+    const startTs = Date.now();
+    labelEl.classList.add('on');
+    const tick = () => {
+      const elapsed = Date.now() - startTs;
+      let extra = '';
+      try {
+        const st = statsFn() || {};
+        const done = st.done || 0, total = st.total || 0;
+        if (done > 0 && total > 0 && elapsed >= 3000) {
+          const rate = done / (elapsed / 1000); // bytes/sec
+          if (rate > 0) {
+            const remainingMs = ((total - done) / rate) * 1000;
+            extra = remainingMs > 1500
+              ? ` · ETA ${formatEta(remainingMs)} (done ${formatFinishTime(Date.now() + remainingMs)})`
+              : ' · almost done…';
+          }
+        } else if (total > 0) {
+          extra = ' · calculating ETA…';
+        }
+      } catch {}
+      labelEl.textContent = `⏱ ${formatClock(elapsed)} elapsed${extra}`;
+    };
+    tick();
+    timers[side] = { intervalId: setInterval(tick, 1000), labelEl, startTs };
+  }
+  function stopTransferTimer(side, finished) {
+    const t = timers[side];
+    if (!t) return;
+    clearInterval(t.intervalId);
+    delete timers[side];
+    if (finished) {
+      // keep the final line visible as a summary until the next transfer
+      t.labelEl.textContent = `⏱ Finished in ${formatClock(Date.now() - t.startTs)}`;
+    } else {
+      t.labelEl.classList.remove('on');
+      t.labelEl.textContent = '';
+    }
+  }
+
   // ---------- progress readouts ----------
   // Renders "45% · 6.5 GB sent · 3.5 GB left" under a progress bar.
-  function updateProgressLabel(el, done, total) {
+  // Optional prefix (e.g. "File 2 of 5 · ") goes in front.
+  function updateProgressLabel(el, done, total, prefix) {
     const pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
     const left = Math.max(0, total - done);
     el.innerHTML = '';
+    if (prefix) el.appendChild(document.createTextNode(prefix));
     const strong = document.createElement('strong');
     strong.textContent = `${Math.round(pct)}%`;
     el.appendChild(strong);
