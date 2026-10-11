@@ -870,7 +870,7 @@ app.get('/api/qr', async (req, res) => {
 app.get('/healthz', (req, res) => res.send('ok'));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 }); // signaling messages are tiny; cap them so nobody can push big payloads at the server
 
 // roomId -> { peers: Set<ws>, salt: Buffer|null, passwordHash: Buffer|null,
 //             theme: string, senderName: string, senderMessage: string }
