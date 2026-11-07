@@ -873,8 +873,10 @@ app.get('/healthz', (req, res) => res.send('ok'));
 // Browsers have no local-network discovery API (no mDNS/Bonjour API;
 // Web Bluetooth is Chrome-only and finds BLE peripherals, not browsers),
 // so "nearby" here means: same network as seen by this server — the
-// same public IP, or the same IPv6 /64 prefix (devices on one LAN
-// usually share a /64 but get distinct global addresses). A room is
+// same public IP, the same private-LAN /24 (192.168.8.50 and
+// 192.168.8.60 are two devices on one Wi-Fi), or the same IPv6 /64
+// prefix (devices on one LAN usually share a /64 but get distinct
+// global addresses). A room is
 // listed only while its sender is connected and waiting (1 peer), only
 // to requesters on that same network, and only under an opaque
 // nearbyId — the room code itself is never in the list payload, and
@@ -901,7 +903,10 @@ app.get('/api/nearby', (req, res) => {
     });
     if (devices.length >= 20) break;
   }
-  res.json({ ok: true, devices });
+  // `you` is the address this request appeared to come from — the
+  // Receive tab shows it, so a "not listed" report can be answered by
+  // comparing the two devices' values instead of guessing.
+  res.json({ ok: true, you: ip, devices });
 });
 
 const server = http.createServer(app);
@@ -945,11 +950,29 @@ function expandIPv6(ip) {
   return [...head, ...Array(missing).fill('0'), ...tail];
 }
 
+function isPrivateIPv4(ip) {
+  // RFC1918 + link-local. A private /24 is one household LAN.
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip || '');
+  if (!m) return false;
+  const a = +m[1], b = +m[2];
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
 function sameNetwork(a, b) {
   a = normalizeIp(a);
   b = normalizeIp(b);
   if (!a || !b) return false;
   if (a === b) return true;
+  // Same private LAN (/24): 192.168.8.50 and 192.168.8.60 are two
+  // devices on one Wi-Fi, not two strangers — an exact-match rule
+  // could never pair them, which is exactly how direct LAN-IP access
+  // failed: every device on the LAN has its own private address.
+  // Public addresses keep the exact-match rule: a shared public IP
+  // there is CGNAT, and a whole /24 of strangers must not count as
+  // "nearby".
+  if (isPrivateIPv4(a) && isPrivateIPv4(b)) {
+    return a.split('.').slice(0, 3).join('.') === b.split('.').slice(0, 3).join('.');
+  }
   // Same IPv6 /64: the first four hextets match.
   if (a.includes(':') && b.includes(':')) {
     const ea = expandIPv6(a);
