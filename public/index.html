@@ -390,6 +390,7 @@
       </div>
       <div class="nearby-list" id="nearby-list"></div>
       <div class="nearby-empty" id="nearby-empty">Looking for senders on this network…</div>
+      <div class="nearby-empty" id="nearby-you"></div>
     </div>
 
     <div class="sender-info hidden" id="sender-info">
@@ -1243,6 +1244,7 @@
   // input and must never be parsed as HTML.
   const nearbyListEl = document.getElementById('nearby-list');
   const nearbyEmptyEl = document.getElementById('nearby-empty');
+  const nearbyYouEl = document.getElementById('nearby-you');
   let nearbyTimer = null;
   let nearbyFetching = false;
 
@@ -1252,6 +1254,9 @@
     try {
       const res = await fetch('/api/nearby');
       const data = await res.json();
+      // Show the address this device appears as, so a sender and a
+      // receiver can compare values when a device doesn't show up.
+      nearbyYouEl.textContent = data && data.you ? `You appear as ${data.you}` : '';
       renderNearby((data && data.devices) || []);
     } catch {
       // Server unreachable / offline: leave the last list in place.
