@@ -885,6 +885,12 @@ app.get('/healthz', (req, res) => res.send('ok'));
 // the room; it is never logged or written to disk.
 app.get('/api/nearby', (req, res) => {
   const ip = normalizeIp(req.ip || '');
+  // LAN-only: via the public domain every visitor looks like the
+  // tunnel/proxy address, so nothing is ever listed there — nobody on
+  // the internet can discover a transfer through Nearby. The `you`
+  // diagnostic is still returned, so the Receive tab can say what the
+  // server sees.
+  if (!isLanDirect(req)) return res.json({ ok: true, you: ip, devices: [] });
   if (!rateOk(`nearby:${ip || 'unknown'}`, 30, 60_000)) {
     return res.status(429).json({ ok: false, error: 'Too many requests. Slow down and try again.' });
   }
@@ -992,6 +998,37 @@ function roomByNearbyId(nearbyId) {
     if (room.nearbyId === nearbyId) return { roomId, room };
   }
   return null;
+}
+
+// LAN-only gate for Nearby: discovery is a LAN feature, never a
+// public-domain one. A request is "LAN-direct" when it arrived
+// straight at this server's LAN address — the Host is a literal
+// private IP / localhost, and Cloudflare did not handle it (Cloudflare
+// always sets CF-Connecting-IP and overwrites any client-sent value,
+// so its presence proves the request came through the public domain).
+// Either signal alone blocks the domain path: a domain visitor's Host
+// is the public name, and even a forged Host cannot fake away the CF
+// header. Without this, a domain visitor appears as the tunnel/proxy
+// address (e.g. 192.168.8.196), which sits in the same private /24 as
+// a LAN sender — and would be shown their rooms.
+function lanHost(host) {
+  if (!host || typeof host !== 'string') return false;
+  let h = host.trim().toLowerCase();
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']');
+    if (end < 0) return false;
+    h = h.slice(1, end);
+  } else {
+    h = h.split(':')[0];
+  }
+  if (h === 'localhost' || h === '::1') return true;
+  return isPrivateIPv4(h) || h === '127.0.0.1';
+}
+
+function isLanDirect(req) {
+  const headers = (req && req.headers) || {};
+  if (headers['cf-connecting-ip']) return false;
+  return lanHost(headers.host);
 }
 
 function generateRoomCode() {
@@ -1115,9 +1152,10 @@ wss.on('connection', (ws, req) => {
         const senderMessage = typeof msg.message === 'string' ? msg.message.trim().slice(0, 300) : '';
 
         // Nearby discovery: on by default, the sender opts out with the
-        // checkbox. File metadata is what the Receive tab shows in the
-        // nearby list (names + sizes only — never contents).
-        const nearby = msg.nearby !== false;
+        // checkbox — and the server opts it out whenever the transfer
+        // was NOT created over the LAN (see isLanDirect): a room created
+        // via the public domain is code/link/QR only, never listed.
+        const nearby = isLanDirect(req) && msg.nearby !== false;
         const deviceName = typeof msg.deviceName === 'string' ? msg.deviceName.trim().slice(0, 60) : '';
         const filesMeta = Array.isArray(msg.files) ? msg.files.slice(0, 100).map((f) => ({
           name: f && typeof f.name === 'string' ? f.name.slice(0, 120) : 'file',
@@ -1133,7 +1171,7 @@ wss.on('connection', (ws, req) => {
         ws.roomId = roomId;
         // Audit trail (metadata only): who created which room, and when.
         logTransfer({ userId: wsUser ? wsUser.id : null, email: wsUser ? wsUser.email : 'anonymous', roomId, protected: !!passwordHash });
-        ws.send(JSON.stringify({ type: 'created', roomId, protected: !!passwordHash, nearbyId: rooms.get(roomId).nearbyId }));
+        ws.send(JSON.stringify({ type: 'created', roomId, protected: !!passwordHash, nearbyId: rooms.get(roomId).nearbyId, nearby }));
         break;
       }
 
@@ -1148,7 +1186,7 @@ wss.on('connection', (ws, req) => {
         let room = roomId ? rooms.get(roomId) : null;
         if (msg.nearbyId) {
           const found = roomByNearbyId(String(msg.nearbyId));
-          if (found && found.room.nearby && sameNetwork(clientIpFromWsReq(req), found.room.ip)) {
+          if (found && found.room.nearby && isLanDirect(req) && sameNetwork(clientIpFromWsReq(req), found.room.ip)) {
             roomId = found.roomId;
             room = found.room;
           } else {

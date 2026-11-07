@@ -904,7 +904,9 @@
         const shareUrl = buildShareUrl(msg.roomId, password);
         document.getElementById('qr-img').src = `/api/qr?text=${encodeURIComponent(shareUrl)}`;
 
-        setStatus(sendStatus, 'Waiting for the receiver to connect…');
+        setStatus(sendStatus, (nearby && msg.nearby === false)
+          ? 'Waiting for the receiver to connect… (Nearby lists LAN devices only, so share the code or link.)'
+          : 'Waiting for the receiver to connect…');
         setConnBadge('send', 'waiting', 'Waiting for receiver…');
       }
 
