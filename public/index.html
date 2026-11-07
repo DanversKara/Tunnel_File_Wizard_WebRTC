@@ -194,6 +194,7 @@
   .nearby-item .n-icon { font-size: 18px; flex-shrink: 0; }
   .nearby-item .n-body { flex: 1; min-width: 0; }
   .nearby-item .n-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nearby-item .n-ip { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
   .nearby-item .n-sub { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
   .nearby-item .n-go { color: var(--accent); font-size: 13px; flex-shrink: 0; }
   .nearby-empty { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
@@ -1256,9 +1257,16 @@
     try {
       const res = await fetch('/api/nearby');
       const data = await res.json();
-      // Show the address this device appears as, so a sender and a
-      // receiver can compare values when a device doesn't show up.
-      nearbyYouEl.textContent = data && data.you ? `You appear as ${data.you}` : '';
+      if (data && data.lan === false) {
+        // Off the LAN (public domain): Nearby doesn't apply here, and
+        // the tunnel/proxy address is not the visitor's — so say so
+        // instead of showing an address that isn't theirs.
+        nearbyYouEl.textContent = 'Nearby devices works on your local network only — please use a connect code.';
+      } else {
+        // Show the address this device appears as, so a sender and a
+        // receiver can compare values when a device doesn't show up.
+        nearbyYouEl.textContent = data && data.you ? `You appear as ${data.you}` : '';
+      }
       renderNearby((data && data.devices) || []);
     } catch {
       // Server unreachable / offline: leave the last list in place.
@@ -1290,6 +1298,11 @@
       const name = document.createElement('div');
       name.className = 'n-name';
       name.textContent = (d.device || d.senderName || 'Nearby device') + (d.protected ? ' 🔒' : '');
+      const ipLine = document.createElement('div');
+      ipLine.className = 'n-ip';
+      // The sender's LAN address, so the receiver can tell this is
+      // the right device before tapping it.
+      ipLine.textContent = d.ip || '';
       const sub = document.createElement('div');
       sub.className = 'n-sub';
       const files = Array.isArray(d.files) ? d.files : [];
@@ -1298,6 +1311,7 @@
       const more = files.length > 2 ? ` +${files.length - 2} more` : '';
       sub.textContent = `${d.senderName ? d.senderName + ' · ' : ''}${fileBits}${more} (${formatBytes(total)})`;
       body.appendChild(name);
+      body.appendChild(ipLine);
       body.appendChild(sub);
       btn.appendChild(body);
       const go = document.createElement('span');
