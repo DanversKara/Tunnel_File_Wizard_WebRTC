@@ -201,7 +201,7 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const db = store.load();
   if (db.users.length > 0) return next();
-  if (req.path === '/api/bootstrap' || req.path === '/api/setup' || req.path === '/healthz') return next();
+  if (req.path === '/api/bootstrap' || req.path === '/api/setup' || req.path === '/api/nearby' || req.path === '/healthz') return next();
   if (req.path.startsWith('/api/')) return res.status(403).json({ ok: false, error: 'setup_required' });
   if (req.path === '/' || req.path === '/index.html') return res.redirect('/setup.html');
   return next(); // static assets (css/js) the setup page needs
@@ -869,12 +869,107 @@ app.get('/api/qr', async (req, res) => {
 
 app.get('/healthz', (req, res) => res.send('ok'));
 
+// --- nearby discovery -------------------------------------------------------
+// Browsers have no local-network discovery API (no mDNS/Bonjour API;
+// Web Bluetooth is Chrome-only and finds BLE peripherals, not browsers),
+// so "nearby" here means: same network as seen by this server — the
+// same public IP, or the same IPv6 /64 prefix (devices on one LAN
+// usually share a /64 but get distinct global addresses). A room is
+// listed only while its sender is connected and waiting (1 peer), only
+// to requesters on that same network, and only under an opaque
+// nearbyId — the room code itself is never in the list payload, and
+// joining by nearbyId re-checks the network match server-side. The
+// sender's IP lives only in the in-memory room record and dies with
+// the room; it is never logged or written to disk.
+app.get('/api/nearby', (req, res) => {
+  const ip = normalizeIp(req.ip || '');
+  if (!rateOk(`nearby:${ip || 'unknown'}`, 30, 60_000)) {
+    return res.status(429).json({ ok: false, error: 'Too many requests. Slow down and try again.' });
+  }
+  const devices = [];
+  for (const room of rooms.values()) {
+    if (!room.nearby || !room.nearbyId || room.peers.size !== 1) continue;
+    if (!sameNetwork(ip, room.ip)) continue;
+    devices.push({
+      id: room.nearbyId,
+      device: room.deviceName || '',
+      senderName: room.senderName || '',
+      message: room.senderMessage || '',
+      protected: !!room.passwordHash,
+      files: room.files || [],
+      createdAt: room.createdAt || 0,
+    });
+    if (devices.length >= 20) break;
+  }
+  res.json({ ok: true, devices });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 }); // signaling messages are tiny; cap them so nobody can push big payloads at the server
 
 // roomId -> { peers: Set<ws>, salt: Buffer|null, passwordHash: Buffer|null,
-//             theme: string, senderName: string, senderMessage: string }
+//             theme: string, senderName: string, senderMessage: string,
+//             ip: string, nearby: boolean, nearbyId: string|null,
+//             deviceName: string, files: [{name, size}], createdAt: number }
 const rooms = new Map();
+
+function normalizeIp(ip) {
+  if (!ip || typeof ip !== 'string') return '';
+  let v = ip.trim().toLowerCase();
+  if (v.startsWith('::ffff:')) v = v.slice(7); // IPv4-mapped IPv6
+  return v;
+}
+
+// The WebSocket upgrade request bypasses Express, so trust-proxy does
+// not apply here: take the first X-Forwarded-For hop (the real client,
+// as set by Cloudflare / NPM / the tunnel), falling back to the socket.
+function clientIpFromWsReq(req) {
+  const xff = req && req.headers ? req.headers['x-forwarded-for'] : '';
+  if (typeof xff === 'string' && xff) return normalizeIp(xff.split(',')[0]);
+  if (Array.isArray(xff) && xff.length) return normalizeIp(String(xff[0]).split(',')[0]);
+  return normalizeIp(req && req.socket ? req.socket.remoteAddress : '');
+}
+
+function expandIPv6(ip) {
+  // Returns 8 hextets, or null if the address is not valid IPv6.
+  const parts = ip.split('::');
+  if (parts.length > 2) return null;
+  if (parts.length === 1) {
+    const p = ip.split(':');
+    return p.length === 8 ? p : null;
+  }
+  const head = parts[0] ? parts[0].split(':') : [];
+  const tail = parts[1] ? parts[1].split(':') : [];
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0) return null;
+  return [...head, ...Array(missing).fill('0'), ...tail];
+}
+
+function sameNetwork(a, b) {
+  a = normalizeIp(a);
+  b = normalizeIp(b);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Same IPv6 /64: the first four hextets match.
+  if (a.includes(':') && b.includes(':')) {
+    const ea = expandIPv6(a);
+    const eb = expandIPv6(b);
+    if (!ea || !eb) return false;
+    for (let i = 0; i < 4; i++) {
+      if (parseInt(ea[i], 16) !== parseInt(eb[i], 16)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+function roomByNearbyId(nearbyId) {
+  if (!nearbyId || typeof nearbyId !== 'string') return null;
+  for (const [roomId, room] of rooms) {
+    if (room.nearbyId === nearbyId) return { roomId, room };
+  }
+  return null;
+}
 
 function generateRoomCode() {
   // 6-digit human-typeable code, easy to read aloud or type on a phone
@@ -996,19 +1091,48 @@ wss.on('connection', (ws, req) => {
         const senderName = typeof msg.senderName === 'string' ? msg.senderName.trim().slice(0, 60) : '';
         const senderMessage = typeof msg.message === 'string' ? msg.message.trim().slice(0, 300) : '';
 
-        rooms.set(roomId, { peers: new Set([ws]), salt, passwordHash, theme, senderName, senderMessage });
+        // Nearby discovery: on by default, the sender opts out with the
+        // checkbox. File metadata is what the Receive tab shows in the
+        // nearby list (names + sizes only — never contents).
+        const nearby = msg.nearby !== false;
+        const deviceName = typeof msg.deviceName === 'string' ? msg.deviceName.trim().slice(0, 60) : '';
+        const filesMeta = Array.isArray(msg.files) ? msg.files.slice(0, 100).map((f) => ({
+          name: f && typeof f.name === 'string' ? f.name.slice(0, 120) : 'file',
+          size: f && Number.isFinite(+f.size) && +f.size >= 0 ? Math.floor(+f.size) : 0,
+        })) : [];
+
+        rooms.set(roomId, {
+          peers: new Set([ws]), salt, passwordHash, theme, senderName, senderMessage,
+          ip: clientIpFromWsReq(req), nearby,
+          nearbyId: nearby ? crypto.randomBytes(16).toString('hex') : null,
+          deviceName, files: filesMeta, createdAt: Date.now(),
+        });
         ws.roomId = roomId;
         // Audit trail (metadata only): who created which room, and when.
         logTransfer({ userId: wsUser ? wsUser.id : null, email: wsUser ? wsUser.email : 'anonymous', roomId, protected: !!passwordHash });
-        ws.send(JSON.stringify({ type: 'created', roomId, protected: !!passwordHash }));
+        ws.send(JSON.stringify({ type: 'created', roomId, protected: !!passwordHash, nearbyId: rooms.get(roomId).nearbyId }));
         break;
       }
 
       case 'join': {
         // No login gate here: the room code (+ optional password) is the
         // credential. Anyone holding a shared link joins without an account.
-        const roomId = String(msg.roomId || '').trim().toLowerCase();
-        const room = rooms.get(roomId);
+        // Joining by nearbyId is the same check with a different key: the
+        // opaque id from GET /api/nearby, re-validated here against the
+        // requester's network — a leaked or guessed id is useless from
+        // anywhere else, and the room password still applies either way.
+        let roomId = String(msg.roomId || '').trim().toLowerCase();
+        let room = roomId ? rooms.get(roomId) : null;
+        if (msg.nearbyId) {
+          const found = roomByNearbyId(String(msg.nearbyId));
+          if (found && found.room.nearby && sameNetwork(clientIpFromWsReq(req), found.room.ip)) {
+            roomId = found.roomId;
+            room = found.room;
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'That nearby device is no longer available.' }));
+            return;
+          }
+        }
         if (!room || room.peers.size >= 2) {
           ws.send(JSON.stringify({ type: 'error', message: 'That code is invalid, expired, or already in use.' }));
           return;

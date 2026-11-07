@@ -179,6 +179,25 @@
   .join-form input:focus { outline: none; border-color: var(--accent); }
   .join-form button { width: auto; padding: 0 18px; margin-top: 0; }
 
+  /* ---------- nearby devices ---------- */
+  .nearby { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+  .nearby-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .nearby-head .title { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .nearby-head button { width: auto; margin-top: 0; padding: 6px 12px; font-size: 12.5px; }
+  .nearby-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .nearby-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: var(--inset); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 12px; color: var(--text); cursor: pointer; margin-top: 0; font-weight: 400;
+  }
+  .nearby-item:hover { border-color: var(--accent); filter: none; }
+  .nearby-item .n-icon { font-size: 18px; flex-shrink: 0; }
+  .nearby-item .n-body { flex: 1; min-width: 0; }
+  .nearby-item .n-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nearby-item .n-sub { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .nearby-item .n-go { color: var(--accent); font-size: 13px; flex-shrink: 0; }
+  .nearby-empty { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+
   .status { margin-top: 16px; font-size: 13px; color: var(--muted); min-height: 18px; }
   .status.good { color: var(--good); }
   .status.bad { color: var(--danger); }
@@ -310,6 +329,16 @@
     </div>
 
     <div class="field">
+      <div class="field-label">Device name <span class="opt">(optional — shown to nearby devices)</span></div>
+      <input type="text" id="device-name-input" class="plain" placeholder="e.g. Kara's laptop" maxlength="60" autocomplete="off" />
+    </div>
+
+    <div class="field">
+      <label><input type="checkbox" id="nearby-toggle" checked /> Show this transfer on nearby devices</label>
+      <div class="field-hint">Devices on the same Wi-Fi / network see it in their Receive tab and can tap to connect — no code to type. Turn it off and only the code/link works.</div>
+    </div>
+
+    <div class="field">
       <label><input type="checkbox" id="pw-toggle" /> Password protect this transfer</label>
       <input type="password" id="pw-input" class="hidden" placeholder="Choose a password" autocomplete="new-password" />
     </div>
@@ -352,6 +381,15 @@
     </div>
     <div class="field">
       <input type="password" id="join-pw" class="plain" placeholder="Password (leave blank if none)" autocomplete="off" />
+    </div>
+
+    <div class="nearby" id="nearby-section">
+      <div class="nearby-head">
+        <span class="title">📡 Nearby devices</span>
+        <button type="button" class="secondary" id="btn-refresh-nearby">Refresh</button>
+      </div>
+      <div class="nearby-list" id="nearby-list"></div>
+      <div class="nearby-empty" id="nearby-empty">Looking for senders on this network…</div>
     </div>
 
     <div class="sender-info hidden" id="sender-info">
@@ -560,8 +598,24 @@
   let selectedFiles = [];
   const sendState = { sentBytes: 0, totalBytes: 0 }; // live counters feeding the send-side timer/ETA
   let currentRoomId = null;
+  let currentNearbyId = null; // opaque id for this room in the nearby list (lets us hide our own device from it)
   let currentPassword = '';
   let transferActive = false; // guards the beforeunload warning
+
+  // ---------- nearby discovery ----------
+  // The device name shown in other devices' nearby list. Prefilled from
+  // a saved name, or guessed from the browser/OS ("Chrome · Windows") —
+  // the sender can edit it on the Send panel before creating a transfer.
+  function guessDeviceName() {
+    try {
+      const saved = localStorage.getItem('tfw-device-name');
+      if (saved) return saved;
+    } catch {}
+    const ua = navigator.userAgent || '';
+    const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+    const os = /iPhone|iPad/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
+    return os ? `${browser} · ${os}` : browser;
+  }
 
   // ---------- tabs ----------
   function activateTab(name) {
@@ -575,6 +629,9 @@
     active.classList.remove('panel-enter');
     void active.offsetWidth; // force reflow so the animation restarts
     active.classList.add('panel-enter');
+    // Nearby discovery only runs while the Receive panel is visible.
+    if (name === 'receive') startNearbyPolling();
+    else stopNearbyPolling();
   }
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => activateTab(tab.dataset.tab));
@@ -795,6 +852,9 @@
   const customCodeHint = document.getElementById('custom-code-hint');
   const senderNameInput = document.getElementById('sender-name-input');
   const senderMessageInput = document.getElementById('sender-message-input');
+  const deviceNameInput = document.getElementById('device-name-input');
+  const nearbyToggle = document.getElementById('nearby-toggle');
+  deviceNameInput.value = guessDeviceName();
 
   btnCreate.addEventListener('click', async () => {
     const customCode = customCodeInput.value.trim().toLowerCase();
@@ -819,12 +879,16 @@
     const password = pwToggle.checked ? pwInput.value : '';
     const senderName = senderNameInput.value.trim();
     const senderMessage = senderMessageInput.value.trim();
+    const deviceName = deviceNameInput.value.trim();
+    try { localStorage.setItem('tfw-device-name', deviceName); } catch {}
+    const nearby = nearbyToggle.checked;
 
     ws.onmessage = async (evt) => {
       const msg = JSON.parse(evt.data);
 
       if (msg.type === 'created') {
         currentRoomId = msg.roomId;
+        currentNearbyId = msg.nearbyId || null;
         currentPassword = password;
         const codeEl = document.getElementById('send-code');
         codeEl.textContent = msg.roomId;
@@ -887,7 +951,10 @@
       }
     };
 
-    ws.send(JSON.stringify({ type: 'create', password, theme: selectedTheme, customCode, senderName, message: senderMessage }));
+    ws.send(JSON.stringify({
+      type: 'create', password, theme: selectedTheme, customCode, senderName, message: senderMessage,
+      nearby, deviceName, files: selectedFiles.map(f => ({ name: f.name, size: f.size })),
+    }));
   });
 
   document.getElementById('btn-copy-code').addEventListener('click', async (e) => {
@@ -1036,12 +1103,18 @@
     }
   }
 
-  async function joinRoom(roomId, password) {
-    roomId = roomId.trim().toLowerCase();
-    if (!isValidRoomId(roomId)) {
+  // pendingNearbyId: set when the user taps a password-protected nearby
+  // device before entering its password — the Connect button then joins
+  // that device instead of whatever is (or isn't) in the code field.
+  let pendingNearbyId = null;
+
+  async function joinRoom(roomId, password, nearbyId) {
+    roomId = (roomId || '').trim().toLowerCase();
+    if (!nearbyId && !isValidRoomId(roomId)) {
       setStatus(recvStatus, 'Enter the 6-digit code (or custom link name) you were given.', true);
       return;
     }
+    stopNearbyPolling(); // we're connecting now; no need to keep listing devices
     btnJoin.disabled = true;
     showSenderInfo('', '');
     setStatus(recvStatus, 'Connecting…');
@@ -1124,6 +1197,7 @@
         setStatus(recvStatus, msg.message, true);
         setConnBadge('recv', 'bad', 'Could not connect');
         btnJoin.disabled = false;
+        startNearbyPolling(); // let them pick a different nearby device instead
       }
 
       if (msg.type === 'signal') {
@@ -1143,11 +1217,111 @@
       }
     };
 
-    ws.send(JSON.stringify({ type: 'join', roomId, password }));
+    ws.send(JSON.stringify(nearbyId
+      ? { type: 'join', nearbyId, password }
+      : { type: 'join', roomId, password }));
   }
 
   btnJoin.addEventListener('click', () => {
-    joinRoom(joinCodeInput.value.trim(), joinPwInput.value);
+    const code = joinCodeInput.value.trim();
+    if (!code && pendingNearbyId) {
+      const id = pendingNearbyId;
+      pendingNearbyId = null;
+      joinRoom('', joinPwInput.value, id);
+      return;
+    }
+    pendingNearbyId = null;
+    joinRoom(code, joinPwInput.value);
+  });
+  joinCodeInput.addEventListener('input', () => { pendingNearbyId = null; });
+
+  // ---------- nearby devices (Receive tab) ----------
+  // Polls GET /api/nearby while the Receive panel is visible. The list
+  // only ever contains senders on this same network, and tapping one
+  // joins by its opaque id — the room code is never shown or typed.
+  // Rendered with textContent only: device/file names are other users'
+  // input and must never be parsed as HTML.
+  const nearbyListEl = document.getElementById('nearby-list');
+  const nearbyEmptyEl = document.getElementById('nearby-empty');
+  let nearbyTimer = null;
+  let nearbyFetching = false;
+
+  async function fetchNearby() {
+    if (nearbyFetching || document.hidden) return;
+    nearbyFetching = true;
+    try {
+      const res = await fetch('/api/nearby');
+      const data = await res.json();
+      renderNearby((data && data.devices) || []);
+    } catch {
+      // Server unreachable / offline: leave the last list in place.
+    } finally {
+      nearbyFetching = false;
+    }
+  }
+
+  function renderNearby(devices) {
+    // Don't list our own transfer back to ourselves.
+    const visible = devices.filter(d => d.id !== currentNearbyId);
+    nearbyListEl.innerHTML = '';
+    if (!visible.length) {
+      nearbyEmptyEl.textContent = 'No nearby senders found. Make sure both devices are on the same Wi-Fi, the sender picked files and tapped Create transfer, and Nearby is turned on over there.';
+      nearbyEmptyEl.classList.remove('hidden');
+      return;
+    }
+    nearbyEmptyEl.classList.add('hidden');
+    visible.forEach(d => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'nearby-item';
+      const icon = document.createElement('span');
+      icon.className = 'n-icon';
+      icon.textContent = '📱';
+      btn.appendChild(icon);
+      const body = document.createElement('span');
+      body.className = 'n-body';
+      const name = document.createElement('div');
+      name.className = 'n-name';
+      name.textContent = (d.device || d.senderName || 'Nearby device') + (d.protected ? ' 🔒' : '');
+      const sub = document.createElement('div');
+      sub.className = 'n-sub';
+      const files = Array.isArray(d.files) ? d.files : [];
+      const total = files.reduce((a, f) => a + (f.size || 0), 0);
+      const fileBits = files.slice(0, 2).map(f => f.name).join(', ') || 'file transfer';
+      const more = files.length > 2 ? ` +${files.length - 2} more` : '';
+      sub.textContent = `${d.senderName ? d.senderName + ' · ' : ''}${fileBits}${more} (${formatBytes(total)})`;
+      body.appendChild(name);
+      body.appendChild(sub);
+      btn.appendChild(body);
+      const go = document.createElement('span');
+      go.className = 'n-go';
+      go.textContent = 'Connect ›';
+      btn.appendChild(go);
+      btn.addEventListener('click', () => {
+        if (d.protected && !joinPwInput.value) {
+          pendingNearbyId = d.id;
+          setStatus(recvStatus, `Enter the password for ${d.device || d.senderName || 'that device'} above, then tap Connect.`);
+          joinPwInput.focus();
+          return;
+        }
+        pendingNearbyId = null;
+        joinRoom('', joinPwInput.value, d.id);
+      });
+      nearbyListEl.appendChild(btn);
+    });
+  }
+
+  function startNearbyPolling() {
+    stopNearbyPolling();
+    fetchNearby();
+    nearbyTimer = setInterval(fetchNearby, 5000);
+  }
+  function stopNearbyPolling() {
+    if (nearbyTimer) { clearInterval(nearbyTimer); nearbyTimer = null; }
+  }
+  document.getElementById('btn-refresh-nearby').addEventListener('click', fetchNearby);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !document.getElementById('panel-receive').classList.contains('hidden')) fetchNearby();
   });
 
   function finishDownload(meta, chunks, moreComing) {
@@ -1205,6 +1379,8 @@
       btnCreate.disabled = !selectedFiles.length;
     } else {
       btnJoin.disabled = false;
+      // Back to the nearby list if the sender dropped.
+      if (!document.getElementById('panel-receive').classList.contains('hidden')) startNearbyPolling();
     }
   }
 

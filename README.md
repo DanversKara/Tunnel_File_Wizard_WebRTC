@@ -23,6 +23,7 @@ This README covers what Tunnel File Wizard actually does under the hood, how Web
 - [Share link scrambling](#share-link-scrambling)
 - [Custom link names](#custom-link-names)
 - [Sender name & message](#sender-name--message)
+- [Nearby devices (no code needed)](#nearby-devices-no-code-needed)
 - [Setup](#setup)
   - [Quick start with Docker](#quick-start-with-docker)
   - [Docker Compose](#docker-compose)
@@ -117,6 +118,7 @@ To be precise about the actual guarantee here: **the signaling server (`server.j
 - the (hashed, never plaintext) password, if one is set
 - the theme name the sender picked
 - the sender's display name and/or message, if either was filled in — plain text, held only for the life of the room
+- the device name and file names + sizes, but only when Nearby discovery is on (the default) — that's what the receiver's nearby list shows; untick it on the Send panel and none of that is sent at all
 - WebRTC's connection-setup metadata (SDP/ICE) — addresses and codec/format info, not file content
 - small heartbeat pings to keep the connection alive
 
@@ -153,6 +155,7 @@ If you need resumable transfers for very large or very long-running files, that'
 - **Direct peer-to-peer transfer** over an encrypted WebRTC data channel — no upload step, no cloud storage.
 - **6-digit room codes**, an optional **custom link name**, a **QR code**, and a **shareable link** (code + optional password live in the URL fragment, which browsers never send to any server, so it can't leak into logs — see [Share link scrambling](#share-link-scrambling) below for how they're packed into the link).
 - **Optional sender name and message**, shown to the receiver once they connect — see [Sender name & message](#sender-name--message) below.
+- **Nearby devices** — receivers on the same network see the sender's device in their Receive tab and tap to connect, no code to type — see [Nearby devices](#nearby-devices-no-code-needed) below.
 - **Optional password protection** — hashed with `scrypt` server-side, checked before a receiver is allowed to join the room. This gates *access to the room*, on top of the code; it is not an additional encryption layer on the file (WebRTC's own DTLS-SRTP already handles that).
 - **Themes** — the sender picks a palette; it's applied on the receiver's screen too, synced via the signaling server as plain metadata. Each theme has both a light and dark variant (see [Light/dark mode & theme animation](#lightdark-mode--theme-animation) below), and a soft animated background tinted to the current theme.
 - **Live connection status** on both sides, driven by the real WebRTC connection state, not just "a WebSocket said someone's here."
@@ -200,6 +203,21 @@ Two things worth knowing:
 Two more optional fields on the send panel: your name, and a short message. Neither is required — leave both blank and nothing changes from before. Fill either in and the receiver sees it right after they connect (before the transfer starts), in a small card above the connection status: your name renders as "*Alex* wants to send you a file", and the message renders underneath it as plain text.
 
 Like the theme, these travel through the signaling server as plain, unencrypted metadata (see [What "nothing is stored" really means](#what-nothing-is-stored-really-means)) — name capped at 60 characters, message at 300, both server-enforced regardless of what the client sends. They're held in memory only for the life of the room and are never written anywhere or shown to anyone but the one receiver who joins that room.
+
+## Nearby devices (no code needed)
+
+When both devices are on the same network — same Wi-Fi at home, same office LAN — the receiver doesn't need the code at all. The sender picks files and taps **Create transfer** as usual (with **Show this transfer on nearby devices** ticked, which it is by default), and the receiver opens the **Receive** tab: the sender's device shows up under **📡 Nearby devices** with its name, the file names and total size, and a 🔒 if a password is set. Tap it and the transfer connects — the same WebRTC handshake as a code join, just without typing anything.
+
+**How it works.** There is no mDNS, Bonjour, or Bluetooth discovery involved — browsers simply don't offer a local-network discovery API (Web Bluetooth is Chrome-only and finds BLE peripherals, not browsers). Instead the signaling server does presence: when a room is created it notes the sender's network (public IP as the server sees it, or the IPv6 /64 prefix) alongside the room, and `GET /api/nearby` returns the waiting rooms on the *requester's* same network. The list entry carries an opaque id, never the room code, and joining by that id re-checks the network match server-side — a leaked or guessed id is useless from anywhere else. A password-protected room still asks for its password first (tap it, type the password, tap Connect).
+
+**What "same network" means here.** Same public IP covers the usual case (every device behind one home router/NAT shares one public IP). Devices with distinct global IPv6 addresses on the same LAN usually share a /64 prefix, so those match too. One device on Wi-Fi and the other on mobile data are *not* nearby by this definition — that's correct, they aren't on the same network — and the code/link/QR path still works for them.
+
+**Privacy notes, stated plainly:**
+
+- Only devices on your network can see the list, and only while the sender's tab is open and waiting. The moment the sender's tab closes (or a receiver joins), the entry disappears.
+- The list shows the device name (editable on the Send panel, prefilled from a saved name or guessed as e.g. "Chrome · Windows"), the sender name/message if given, and file names + sizes. If any of that is sensitive, untick **Show this transfer on nearby devices** — the code, link, and QR still work exactly as before.
+- The sender's IP is held only in the in-memory room record and dies with the room. It is never logged or written to disk.
+- On a network where many strangers share one public IP (carrier-grade NAT, some public Wi-Fi), those strangers are "nearby" by this definition too — same caveat as any LAN discovery (AirDrop has the same property). The password option exists for exactly that case, and unticking Nearby removes the entry entirely.
 
 ## Setup
 
