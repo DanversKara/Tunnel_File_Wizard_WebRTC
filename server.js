@@ -887,10 +887,12 @@ app.get('/api/nearby', (req, res) => {
   const ip = normalizeIp(req.ip || '');
   // LAN-only: via the public domain every visitor looks like the
   // tunnel/proxy address, so nothing is ever listed there — nobody on
-  // the internet can discover a transfer through Nearby. The `you`
-  // diagnostic is still returned, so the Receive tab can say what the
-  // server sees.
-  if (!isLanDirect(req)) return res.json({ ok: true, you: ip, devices: [] });
+  // the internet can discover a transfer through Nearby. Off the LAN
+  // the response carries no `you` at all: the tunnel/proxy address is
+  // not the visitor's, and showing it only confuses people. The
+  // Receive tab reads `lan: false` and says Nearby is for local
+  // networks, use a code.
+  if (!isLanDirect(req)) return res.json({ ok: true, lan: false, devices: [] });
   if (!rateOk(`nearby:${ip || 'unknown'}`, 30, 60_000)) {
     return res.status(429).json({ ok: false, error: 'Too many requests. Slow down and try again.' });
   }
@@ -904,6 +906,10 @@ app.get('/api/nearby', (req, res) => {
       senderName: room.senderName || '',
       message: room.senderMessage || '',
       protected: !!room.passwordHash,
+      // The sender's LAN address, shown under the device name so the
+      // receiver can tell it's the right device. Only ever sent to
+      // other devices on the same LAN (the whole endpoint is LAN-only).
+      ip: room.ip || '',
       files: room.files || [],
       createdAt: room.createdAt || 0,
     });
@@ -911,8 +917,9 @@ app.get('/api/nearby', (req, res) => {
   }
   // `you` is the address this request appeared to come from — the
   // Receive tab shows it, so a "not listed" report can be answered by
-  // comparing the two devices' values instead of guessing.
-  res.json({ ok: true, you: ip, devices });
+  // comparing the two devices' values instead of guessing. Only
+  // returned on the LAN; off-LAN there is no `you` (see above).
+  res.json({ ok: true, lan: true, you: ip, devices });
 });
 
 const server = http.createServer(app);
